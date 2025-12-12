@@ -14,15 +14,22 @@ COPY requirements.txt .
 # Установка Python зависимостей
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Копирование кода приложения и миграций
+# Копирование кода приложения, миграций и тестов
 COPY api/ ./api/
 COPY migrations/ ./migrations/
+COPY tests/ ./tests/
 COPY alembic.ini .
 COPY .env.example .env
 
 # Точка входа для прогонки миграций перед стартом
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
+
+# PYTHONPATH для тестов
+ENV PYTHONPATH=/app
+
+# Прогон unit-тестов (используем SQLite в /tmp)
+RUN DATABASE_URL=sqlite:////tmp/test.db pytest -q tests
 
 # Создание директории для загрузок
 RUN mkdir -p /tmp/uploads

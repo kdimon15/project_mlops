@@ -9,6 +9,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Код UI
 COPY ui/ .
 
+# Тесты UI
+ENV PYTHONPATH=/app
+RUN pytest -q tests
+
 ENV API_BASE_URL=http://api:8000
 EXPOSE 8501
 
