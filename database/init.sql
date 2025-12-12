@@ -1,0 +1,2 @@
+-- Initialize database
+-- Tables are created by application on startup.

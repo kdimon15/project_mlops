@@ -14,9 +14,15 @@ COPY requirements.txt .
 # Установка Python зависимостей
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Копирование кода приложения
+# Копирование кода приложения и миграций
 COPY api/ ./api/
+COPY migrations/ ./migrations/
+COPY alembic.ini .
 COPY .env.example .env
+
+# Точка входа для прогонки миграций перед стартом
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
 
 # Создание директории для загрузок
 RUN mkdir -p /tmp/uploads
@@ -28,5 +34,6 @@ ENV PYTHONUNBUFFERED=1
 # Порт
 EXPOSE 8000
 
-# Запуск приложения из корня проекта
+# Запуск через entrypoint (алембик + uvicorn)
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

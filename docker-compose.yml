@@ -1,4 +1,24 @@
 services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: callscribe
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   kafka:
     image: apache/kafka:3.7.0
     container_name: kafka
@@ -37,7 +57,7 @@ services:
       APP_NAME: "CallScribe API"
       APP_VERSION: "1.0.0"
       DEBUG: "False"
-      DATABASE_URL: "sqlite:////tmp/callscribe.db"
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/callscribe"
       KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
       KAFKA_AUDIO_TOPIC: "audio-topic"
       KAFKA_TRANSCRIPTION_TOPIC: "transcription-topic"
@@ -49,6 +69,8 @@ services:
       METRICS_ENABLED: "True"
     depends_on:
       kafka:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     ports:
       - "8000:8000"
@@ -101,4 +123,7 @@ services:
     depends_on:
       api:
         condition: service_started
+
+volumes:
+  pgdata:
 

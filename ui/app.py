@@ -86,22 +86,12 @@ def hero() -> None:
         .status-failed { background: #3a0f0f; color: #ffb3b3; }
         </style>
         <div class="hero">
-          <h2 style="margin:0;">CallScribe UI</h2>
+          <h2>CallScribe UI</h2>
           <p style="margin:6px 0 0 0;">1) Выберите встречу Kontur Talk или загрузите файл. 2) Получите транскрипт, саммари и TODO. 3) Копируйте или скачивайте .txt.</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-
-def status_badge(status: str) -> str:
-    css_class = {
-        "queued": "status-queued",
-        "processing": "status-processing",
-        "completed": "status-completed",
-        "failed": "status-failed",
-    }.get(status, "status-queued")
-    return f'<span class="status-chip {css_class}">{status}</span>'
 
 
 def list_recordings(limit: int = 50) -> List[Dict[str, Any]]:
@@ -141,6 +131,7 @@ def upload_file(file, language: str) -> Optional[str]:
 
 
 def load_status(task_id: str) -> Optional[Dict[str, Any]]:
+    """Получить статус задачи."""
     try:
         resp = client().get(f"/api/v1/tasks/{task_id}")
         if resp.status_code >= 400:
@@ -154,9 +145,11 @@ def load_result(task_id: str) -> Optional[Dict[str, Any]]:
     try:
         resp = client().get(f"/api/v1/results/{task_id}")
         if resp.status_code >= 400:
+            st.warning(resp.json().get("detail", "Задача не готова"))
             return None
         return resp.json()
-    except Exception:
+    except Exception as exc:
+        st.error(f"Ошибка запроса результата: {exc}")
         return None
 
 
@@ -169,14 +162,22 @@ def layout_creator() -> Optional[str]:
         with st.spinner("Получаю список встреч..."):
             recordings = list_recordings()
         if recordings:
-            options = {f"{r['title'] or r['recording_id']} · {r['duration']}s": r["recording_id"] for r in recordings}
-            choice = st.selectbox("Встреча", list(options.keys()))
+            options = {}
+            labels = []
+            for idx, r in enumerate(recordings, start=1):
+                title = r.get("title") or "Встреча без названия"
+                dur = r.get("duration")
+                dur_txt = f"{int(dur)}s" if dur is not None else "—"
+                label = f"{idx}. {title} · {dur_txt}"
+                labels.append(label)
+                options[label] = r["recording_id"]
+            choice = st.selectbox("Встреча", labels)
             if st.button("🚀 Обработать встречу"):
                 task_id = process_recording(options[choice])
                 if task_id:
-                    st.success(f"Задача создана: {task_id}")
+                    st.success("Запрос отправлен. Ожидаем готовности результата.")
         else:
-            st.info("Нет доступных записей (или заглушка Kontur Talk вернула пусто).")
+            st.info("Нет доступных записей.")
 
     with tabs[1]:
         uploaded = st.file_uploader("Загрузите аудио/видео", type=["mp3", "wav", "ogg", "m4a", "mp4", "mkv", "webm"])
@@ -186,7 +187,7 @@ def layout_creator() -> Optional[str]:
                 with st.spinner("Отправка файла..."):
                     task_id = upload_file(uploaded, lang)
                     if task_id:
-                        st.success(f"Задача создана: {task_id}")
+                        st.success("Файл отправлен. Ожидаем готовности результата.")
     return task_id
 
 
@@ -202,11 +203,24 @@ def layout_results(task_id: Optional[str]) -> None:
         return
 
     st_status = status.get("status")
-    st.markdown(f"Текущая задача: {task_id} {status_badge(st_status)}", unsafe_allow_html=True)
+    badge_class = {
+        "queued": "status-queued",
+        "processing": "status-processing",
+        "completed": "status-completed",
+        "failed": "status-failed",
+    }.get(st_status, "status-queued")
+    st.markdown(
+        f"Статус: <span class='status-chip {badge_class}'>{st_status}</span>",
+        unsafe_allow_html=True,
+    )
 
     if st_status in ("queued", "processing"):
-        st.info("Задача в обработке. Обновите, когда будет готово.")
-        st.button("🔄 Проверить снова")
+        st.info("Задача в обработке. Страница обновится автоматически.")
+        # Автообновление страницы каждые 5 секунд, пока задача не завершена
+        st.markdown(
+            "<meta http-equiv='refresh' content='5'>",
+            unsafe_allow_html=True,
+        )
         return
 
     if st_status == "failed":
@@ -217,7 +231,6 @@ def layout_results(task_id: Optional[str]) -> None:
         data = load_result(task_id)
 
     if not data:
-        st.warning("Задача завершена, но результат пока недоступен.")
         return
 
     tabs = st.tabs(["Транскрипция", "Саммари", "TODO / Action items"])
