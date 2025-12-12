@@ -1,7 +1,11 @@
 import json
 import logging
 import os
+import shutil
+import subprocess
 import time
+import tempfile
+from glob import glob
 from datetime import datetime
 from urllib.parse import urlparse
 
@@ -25,6 +29,7 @@ ASR_MODEL_REVISION = os.getenv("ASR_MODEL_REVISION", "e2e_rnnt")
 # GigaAM-v3 написан с кастомным .transcribe через trust_remote_code
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DTYPE = torch.float16 if torch.cuda.is_available() else torch.float32
+SEGMENT_SECONDS = int(os.getenv("ASR_SEGMENT_SECONDS", "24"))
 
 
 def db_connect():
@@ -88,6 +93,50 @@ def load_asr_pipeline():
     return model
 
 
+def get_duration(path: str) -> float:
+    try:
+        out = subprocess.check_output(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                path,
+            ]
+        )
+        return float(out.strip())
+    except Exception:
+        return 0.0
+
+
+def split_audio(path: str, segment_seconds: int) -> list[str]:
+    tmp_dir = tempfile.mkdtemp(prefix="asr_segments_")
+    out_tpl = os.path.join(tmp_dir, "seg_%03d.wav")
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        path,
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-f",
+        "segment",
+        "-segment_time",
+        str(segment_seconds),
+        "-c:a",
+        "pcm_s16le",
+        out_tpl,
+    ]
+    subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    segments = sorted(glob(os.path.join(tmp_dir, "seg_*.wav")))
+    return segments, tmp_dir
+
+
 def main():
     asr_model = load_asr_pipeline()
 
@@ -124,9 +173,33 @@ def main():
             if language and language != "auto":
                 transcribe_kwargs["language"] = language
 
-            transcription = asr_model.transcribe(file_path, **transcribe_kwargs)
-            if isinstance(transcription, dict) and "text" in transcription:
-                transcription = transcription["text"]
+            duration = get_duration(file_path)
+
+            def transcribe_one(path: str) -> str:
+                text = asr_model.transcribe(path, **transcribe_kwargs)
+                if isinstance(text, dict) and "text" in text:
+                    text = text["text"]
+                return text or ""
+
+            if duration > SEGMENT_SECONDS:
+                logger.info(
+                    "Splitting long audio (%.1fs) for task %s into %ds chunks",
+                    duration,
+                    task_id,
+                    SEGMENT_SECONDS,
+                )
+                segments, tmp_dir = split_audio(file_path, SEGMENT_SECONDS)
+                parts = []
+                try:
+                    for idx, seg in enumerate(segments, start=1):
+                        part_text = transcribe_one(seg)
+                        logger.info("Task %s chunk %d/%d done", task_id, idx, len(segments))
+                        parts.append(part_text)
+                    transcription = "\n".join(parts).strip()
+                finally:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+            else:
+                transcription = transcribe_one(file_path)
 
             update_task(task_id, status="processing", progress=70, transcription=transcription, language=language)
 

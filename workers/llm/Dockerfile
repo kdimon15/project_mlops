@@ -15,18 +15,18 @@ ENV HF_HOME=/root/.cache/huggingface
 
 # Прекачиваем LLM-модель (gemma 1B) в образ, чтобы на старте не тянуть сетью
 # Хранится в кэше HF; сам инференс продолжает идти через Ollama (LLM worker обращается к Ollama API)
-ARG LLM_MODEL_ID=google/gemma-3-1b-it
+ARG LLM_MODEL_ID=gemma3:1b-it
 ARG LLM_MODEL_REVISION=main
 RUN python - <<'PY'
 import os
 from huggingface_hub import snapshot_download
 
-model_id = os.getenv("LLM_MODEL_ID", "google/gemma-3-1b-it")
+model_id = os.getenv("LLM_MODEL_ID", "gemma3:1b-it")
 revision = os.getenv("LLM_MODEL_REVISION", "main")
 token = os.getenv("HF_TOKEN", "")
 
 if not token:
-    raise SystemExit("HF_TOKEN обязателен для загрузки модели gemma-3-1b-it (доступ ограничен)")
+    raise SystemExit("HF_TOKEN обязателен для загрузки модели gemma3:1b (доступ ограничен)")
 
 print("Downloading", model_id, "rev", revision)
 snapshot_download(

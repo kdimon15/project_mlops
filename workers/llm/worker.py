@@ -16,7 +16,7 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@postgre
 KAFKA_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 TRANSCRIPTION_TOPIC = os.getenv("KAFKA_TRANSCRIPTION_TOPIC", "transcription-topic")
 LLM_API_BASE_URL = os.getenv("LLM_API_BASE_URL", "http://ollama:11434")
-LLM_MODEL = os.getenv("LLM_MODEL", "gemma-3-1b-it")
+LLM_MODEL = os.getenv("LLM_MODEL", "gemma3:1b")
 LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "120"))
 
 PROMPT = """Ты — ассистент, который кратко пересказывает встречу и формирует ключевые пункты и action items.
@@ -76,11 +76,16 @@ def update_task(task_id: str, status: str = None, progress: int = None, summary:
 
 def call_ollama(transcription: str):
     url = LLM_API_BASE_URL.rstrip("/") + "/api/chat"
+    safe_transcription = transcription[:4000] if transcription else ""
+    try:
+        user_content = PROMPT.format(transcription=safe_transcription)
+    except KeyError:
+        user_content = f"Транскрипт:\\n{safe_transcription}"
     payload = {
         "model": LLM_MODEL,
         "messages": [
             {"role": "system", "content": "Ты лаконичный ассистент для встречи."},
-            {"role": "user", "content": PROMPT.format(transcription=transcription[:4000])},
+            {"role": "user", "content": user_content},
         ],
         "stream": False,
         "options": {"temperature": 0.2},

@@ -147,6 +147,7 @@ datasets/
 *.feather
 *.arrow
 !data/.gitkeep
+tmp/
 
 # Audio/Video files (test data)
 *.mp3
