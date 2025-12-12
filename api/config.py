@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     llm_api_base_url: str = "http://ollama:11434/v1"
     llm_api_key: str = "ollama"  # Ollama не требует реального ключа
     llm_model: str = "gemma:2b"
+
+    # Hugging Face
+    hf_token: str = ""
     
     # Kontur Talk Integration
     kontur_talk_api_url: str = ""

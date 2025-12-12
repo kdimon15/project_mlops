@@ -1,0 +1,6 @@
+kafka-python==2.0.2
+psycopg2-binary==2.9.9
+transformers==4.38.0
+huggingface_hub==0.20.3
+requests==2.32.3
+
