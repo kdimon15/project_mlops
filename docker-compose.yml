@@ -130,6 +130,9 @@ services:
     build:
       context: .
       dockerfile: workers/asr/Dockerfile
+      args:
+        HF_TOKEN: ${HF_TOKEN}
+        ASR_MODEL_REVISION: ${ASR_MODEL_REVISION:-e2e_rnnt}
     env_file:
       - .env
     environment:
@@ -152,6 +155,10 @@ services:
     build:
       context: .
       dockerfile: workers/llm/Dockerfile
+      args:
+        HF_TOKEN: ${HF_TOKEN}
+        LLM_MODEL_ID: ${LLM_MODEL_ID:-google/gemma-2b}
+        LLM_MODEL_REVISION: ${LLM_MODEL_REVISION:-main}
     env_file:
       - .env
     environment:
@@ -179,18 +186,6 @@ services:
       - ollama:/root/.ollama
     ports:
       - "11434:11434"
-    entrypoint: ["/bin/sh", "-c"]
-    command: |
-      set -e
-      ollama serve &
-      echo "Ожидаю Ollama..."
-      until ollama list >/dev/null 2>&1; do
-        echo "Ollama не готова, жду..."
-        sleep 2
-      done
-      echo "Тяну модель ${LLM_MODEL:-gemma2:2b}"
-      ollama pull ${LLM_MODEL:-gemma2:2b}
-      wait
     restart: unless-stopped
 
 volumes:
