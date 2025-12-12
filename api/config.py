@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     # Kontur Talk Integration
     kontur_talk_api_url: str = ""
     kontur_talk_api_key: str = ""
+    kontur_talk_webhook_secret: str = ""
+
+    # Zoom Integration
+    zoom_account_id: str = ""
+    zoom_client_id: str = ""
+    zoom_client_secret: str = ""
+    zoom_user_id: str = "me"
+    zoom_base_url: str = "https://api.zoom.us"
+    zoom_auth_url: str = "https://zoom.us/oauth/token"
+    zoom_recording_days_back: int = 30
     
     # File Upload
     max_file_size_mb: int = 500

@@ -29,6 +29,7 @@ class TaskSource(str, Enum):
 
     UPLOAD = "upload"
     KONTUR_TALK = "kontur_talk"
+    ZOOM = "zoom"
 
 
 class HealthResponse(BaseModel):
@@ -122,3 +123,31 @@ class KonturTalkWebhookRequest(BaseModel):
 
     model_config = ConfigDict(use_enum_values=True)
 
+
+class ZoomRecordingFile(BaseModel):
+    """Файл записи Zoom."""
+
+    id: str
+    meeting_id: str | int
+    topic: str | None = None
+    duration_seconds: int | None = None
+    download_url: str
+    file_extension: str | None = None
+    recording_start: str | None = None
+    recording_type: str | None = None
+
+
+class ZoomRecordingsResponse(BaseModel):
+    """Ответ со списком записей Zoom."""
+
+    recordings: list[ZoomRecordingFile]
+
+
+class ZoomProcessRequest(BaseModel):
+    """Запрос на обработку файла Zoom."""
+
+    download_url: str
+    file_extension: str | None = None
+    topic: str | None = None
+    duration_seconds: int | None = None
+    meeting_id: str | None = None

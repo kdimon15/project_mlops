@@ -22,7 +22,7 @@ if str(ROOT_DIR) not in sys.path:
 from api.config import get_settings
 from api.models.schemas import HealthResponse, ErrorResponse
 from api.services.database import init_db
-from api.routers import transcribe, tasks, results, kontur_talk
+from api.routers import transcribe, tasks, results, kontur_talk, zoom
 
 # Настройка логирования
 logging.basicConfig(
@@ -136,6 +136,7 @@ app.include_router(transcribe.router)
 app.include_router(tasks.router)
 app.include_router(results.router)
 app.include_router(kontur_talk.router)
+app.include_router(zoom.router)
 
 # Prometheus metrics endpoint
 metrics_app = make_asgi_app()

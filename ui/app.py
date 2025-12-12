@@ -87,7 +87,8 @@ def hero() -> None:
         </style>
         <div class="hero">
           <h2>CallScribe UI</h2>
-          <p style="margin:6px 0 0 0;">1) Выберите встречу Kontur Talk или загрузите файл. 2) Получите транскрипт, саммари и TODO. 3) Копируйте или скачивайте .txt.</p>
+          <p style="margin:6px 0 0 0;">1) Выберите встречу Kontur Talk или загрузите файл. 2) Получите транскрипт, саммари и TODO. 3) Копируйте или
+          скачивайте .txt.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -113,6 +114,38 @@ def process_recording(recording_id: str) -> Optional[str]:
         return resp.json().get("task_id")
     except Exception as exc:
         st.error(f"Ошибка запроса: {exc}")
+        return None
+
+
+def list_zoom_recordings() -> List[Dict[str, Any]]:
+    try:
+        resp = client().get("/api/v1/zoom/recordings")
+        resp.raise_for_status()
+        return resp.json().get("recordings", [])
+    except Exception as exc:
+        st.error(f"Не удалось получить записи Zoom: {exc}")
+        return []
+
+
+def process_zoom_recording(rec: Dict[str, Any]) -> Optional[str]:
+    try:
+        payload = {
+            "download_url": rec.get("download_url"),
+            "file_extension": rec.get("file_extension"),
+            "topic": rec.get("topic"),
+            "duration_seconds": rec.get("duration_seconds"),
+            "meeting_id": rec.get("meeting_id"),
+        }
+        resp = client().post(
+            f"/api/v1/zoom/recordings/{rec.get('id')}/process",
+            json=payload,
+        )
+        if resp.status_code >= 400:
+            st.error(resp.json().get("detail", "Ошибка запуска обработки Zoom"))
+            return None
+        return resp.json().get("task_id")
+    except Exception as exc:
+        st.error(f"Ошибка запроса к Zoom: {exc}")
         return None
 
 
@@ -155,10 +188,14 @@ def load_result(task_id: str) -> Optional[Dict[str, Any]]:
 
 def layout_creator() -> Optional[str]:
     st.markdown("### Создать задачу")
-    tabs = st.tabs(["Выбрать встречу Kontur Talk", "Загрузить файл"])
+    source = st.radio(
+        "Источник",
+        ["Контур Talk", "Zoom", "Загрузка файла"],
+        horizontal=True,
+    )
     task_id: Optional[str] = None
 
-    with tabs[0]:
+    if source == "Контур Talk":
         with st.spinner("Получаю список встреч..."):
             recordings = list_recordings()
         if recordings:
@@ -179,8 +216,32 @@ def layout_creator() -> Optional[str]:
         else:
             st.info("Нет доступных записей.")
 
-    with tabs[1]:
-        uploaded = st.file_uploader("Загрузите аудио/видео", type=["mp3", "wav", "ogg", "m4a", "mp4", "mkv", "webm"])
+    elif source == "Zoom":
+        with st.spinner("Получаю записи Zoom..."):
+            recordings = list_zoom_recordings()
+        if recordings:
+            labels = []
+            by_label = {}
+            for idx, r in enumerate(recordings, start=1):
+                topic = r.get("topic") or "Zoom запись"
+                dur = r.get("duration_seconds") or 0
+                start_time = r.get("recording_start") or ""
+                label = f"{idx}. {topic} · {int(dur // 60)}m · {start_time}"
+                labels.append(label)
+                by_label[label] = r
+            choice = st.selectbox("Запись", labels)
+            if st.button("🚀 Обработать Zoom-запись"):
+                task_id = process_zoom_recording(by_label[choice])
+                if task_id:
+                    st.success("Запрос отправлен. Ожидаем готовности результата.")
+        else:
+            st.info("Нет доступных записей Zoom.")
+
+    else:
+        uploaded = st.file_uploader(
+            "Загрузите аудио/видео",
+            type=["mp3", "wav", "ogg", "m4a", "mp4", "mkv", "webm"],
+        )
         lang = st.selectbox("Язык", ["auto", "ru", "en"], index=0)
         if st.button("📤 Отправить файл", disabled=uploaded is None):
             if uploaded:
@@ -235,12 +296,20 @@ def layout_results(task_id: Optional[str]) -> None:
 
     tabs = st.tabs(["Транскрипция", "Саммари", "TODO / Action items"])
     with tabs[0]:
-        render_block("Полный текст транскрипции", data.get("transcription", ""), f"{task_id}-transcript")
+        render_block(
+            "Полный текст транскрипции",
+            data.get("transcription", ""),
+            f"{task_id}-transcript",
+        )
     with tabs[1]:
         render_block("Саммари", data.get("summary", ""), f"{task_id}-summary")
     with tabs[2]:
         items = data.get("action_items") or []
-        todo_text = "\n".join(f"- [ ] {item}" for item in items) if items else "Нет action items"
+        todo_text = (
+            "\n".join(f"- [ ] {item}" for item in items)
+            if items
+            else "Нет action items"
+        )
         render_block("TODO / Action items", todo_text, f"{task_id}-todo")
 
 
@@ -258,4 +327,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
