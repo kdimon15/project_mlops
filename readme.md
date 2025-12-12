@@ -10,7 +10,7 @@
 
 ### Решение
 **CallScribe** — MLOps-сервис, который автоматически:
-1. **Транскрибирует** аудио/видео звонки в текст (Whisper)
+1. **Транскрибирует** аудио/видео звонки в текст (GigaAM)
 2. **Суммаризирует** содержание через LLM (Gemma 1.5B на Ollama)
 3. **Сохраняет** результаты для поиска и аналитики
 
@@ -136,7 +136,7 @@
 │       │           ┌──────────────┐     ┌──────────┐   ┌──────────┐              │
 │       │           │              │     │  ASR     │   │   LLM    │              │
 │       └──────────▶│  PostgreSQL  │◀────│  Worker  │   │  Worker  │              │
-│                   │              │     │ (Whisper)│   │ (Gemma)  │              │
+│                   │              │     │ (GigaAM)│    │ (Gemma)  │              │
 │                   └──────────────┘     └──────────┘   └──────────┘              │
 │                          │                                 │                    │
 │                          │                                 ▼                    │
@@ -168,7 +168,7 @@
 | **API Gateway** | FastAPI | REST API, валидация, маршрутизация, webhook |
 | **Kontur Talk Client** | Python | Интеграция с API Kontur Talk |
 | **Message Broker** | Kafka | Асинхронная очередь задач |
-| **ASR Worker** | Whisper | Транскрибация аудио в текст |
+| **ASR Worker** | GigaAM | Транскрибация аудио в текст |
 | **LLM Worker** | Gemma 1.5B (Ollama) | Суммаризация и извлечение тезисов |
 | **Database** | PostgreSQL | Хранение данных |
 | **Monitoring** | Prometheus + Grafana | Метрики и визуализация |
@@ -185,7 +185,7 @@
 - **httpx** — HTTP клиент для Kontur Talk API
 
 ### ML/AI
-- **Whisper** (OpenAI) — ASR модель
+- **GigaAM** (OpenAI) — ASR модель
 - **Gemma 1.5B** — LLM для суммаризации (локально через Ollama)
 - **Ollama** — локальный inference сервер для LLM
 - **FFmpeg** — обработка аудио/видео
@@ -238,7 +238,7 @@ project_mlops/
 │   │   ├── Dockerfile
 │   │   ├── requirements.txt
 │   │   ├── worker.py
-│   │   └── whisper_model.py
+│   │   └── GigaAM_model.py
 │   └── llm/
 │       ├── Dockerfile
 │       ├── requirements.txt
