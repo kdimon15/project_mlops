@@ -16,16 +16,16 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@postgre
 KAFKA_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 TRANSCRIPTION_TOPIC = os.getenv("KAFKA_TRANSCRIPTION_TOPIC", "transcription-topic")
 LLM_API_BASE_URL = os.getenv("LLM_API_BASE_URL", "http://ollama:11434")
-LLM_MODEL = os.getenv("LLM_MODEL", "gemma:2b")
+LLM_MODEL = os.getenv("LLM_MODEL", "gemma-3-1b-it")
 LLM_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "120"))
 
 PROMPT = """Ты — ассистент, который кратко пересказывает встречу и формирует ключевые пункты и action items.
 Верни строго JSON следующего формата:
-{
+{{
   "summary": "краткое резюме в 3-5 предложениях",
   "key_points": ["пункт 1", "пункт 2"],
   "action_items": ["дело 1", "дело 2"]
-}
+}}
 Транскрипт:
 {transcription}
 """
