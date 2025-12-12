@@ -147,7 +147,6 @@ datasets/
 *.feather
 *.arrow
 !data/.gitkeep
-alembic.ini
 
 # Audio/Video files (test data)
 *.mp3
