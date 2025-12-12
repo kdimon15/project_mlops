@@ -28,9 +28,8 @@ class Settings(BaseSettings):
     llm_model: str = "gemma:2b"
     
     # Kontur Talk Integration
-    kontur_talk_api_url: str = "https://api.kontur.ru/talk/v1"
+    kontur_talk_api_url: str = ""
     kontur_talk_api_key: str = ""
-    kontur_talk_webhook_secret: str = ""
     
     # File Upload
     max_file_size_mb: int = 500

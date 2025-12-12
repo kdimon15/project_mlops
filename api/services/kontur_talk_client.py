@@ -1,13 +1,12 @@
 """
 Клиент для интеграции с Kontur Talk API.
-ЗАГЛУШКА - реальная интеграция будет реализована позже.
 """
 import httpx
-import hmac
-import hashlib
 import logging
+from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from api.config import get_settings
 
@@ -18,158 +17,209 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Recording:
     """Модель записи из Kontur Talk."""
-    recording_id: str
-    meeting_id: str
+    key: str
+    title: str
+    created_date: str
+    room_name: str
     duration: int
-    download_url: str
-    title: Optional[str] = None
-    created_at: Optional[str] = None
+    recording_id: Optional[str] = None  # Алиас для key
+    meeting_id: Optional[str] = None  # Алиас для room_name
 
 
 class KonturTalkClient:
     """
     Клиент для работы с API Kontur Talk.
     
-    ЗАГЛУШКА: Методы возвращают mock-данные.
-    Для реальной интеграции необходимо:
-    1. Получить документацию API Kontur Talk
-    2. Реализовать аутентификацию
-    3. Реализовать методы получения записей
+    Методы:
+    - list_recordings: получение списка записей с пагинацией
+    - get_recording: получение информации о записи по ID
+    - download_recording: скачивание записи в файл
     """
     
     def __init__(self):
         self.api_url = settings.kontur_talk_api_url
         self.api_key = settings.kontur_talk_api_key
-        self.webhook_secret = settings.kontur_talk_webhook_secret
         self._client: Optional[httpx.AsyncClient] = None
+        
+        if not self.api_url or not self.api_key:
+            logger.warning("Kontur Talk API URL or API Key not configured")
     
     async def _get_client(self) -> httpx.AsyncClient:
         """Получить HTTP клиент."""
         if self._client is None:
             self._client = httpx.AsyncClient(
-                base_url=self.api_url,
                 headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
+                    "X-Auth-Token": self.api_key,
                 },
-                timeout=30.0
+                timeout=60.0
             )
         return self._client
     
-    def verify_webhook_signature(self, payload: bytes, signature: str) -> bool:
+    async def list_recordings(
+        self,
+        start_from: Optional[str] = None,
+        start_to: Optional[str] = None,
+        query: Optional[str] = None,
+        limit: int = 100,
+        days_back: int = 7
+    ) -> list[Recording]:
         """
-        Проверить подпись webhook запроса от Kontur Talk.
+        Получить список записей из Kontur Talk.
+        
+        Проходит по всем страницам через nextPageToken и возвращает все записи.
         
         Args:
-            payload: Тело запроса в байтах
-            signature: Подпись из заголовка X-Kontur-Signature
+            start_from: Начальная дата (ISO format), например '2025-12-01T00:00:00Z'
+            start_to: Конечная дата (ISO format)
+            query: Поисковый запрос
+            limit: Количество записей на страницу (max 1000)
+            days_back: Количество дней назад (если start_from не указан)
             
         Returns:
-            True если подпись валидна
+            Список записей
         """
-        if not self.webhook_secret:
-            logger.warning("Webhook secret not configured, skipping verification")
-            return True
+        if not self.api_url or not self.api_key:
+            logger.error("Kontur Talk API not configured")
+            return []
         
-        expected_signature = hmac.new(
-            self.webhook_secret.encode(),
-            payload,
-            hashlib.sha256
-        ).hexdigest()
+        # Если даты не указаны, берем последние N дней
+        if not start_from:
+            now = datetime.now(timezone.utc)
+            start_from = (now - timedelta(days=days_back)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            start_to = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         
-        return hmac.compare_digest(expected_signature, signature)
+        url = f"{self.api_url.rstrip('/')}/api/Domain/recordings/v2"
+        client = await self._get_client()
+        
+        page_token = None
+        all_recordings = []
+        page_count = 0
+        
+        try:
+            while True:
+                page_count += 1
+                params = {"top": min(limit, 1000)}
+                
+                if start_from:
+                    params["startFrom"] = start_from
+                if start_to:
+                    params["startTo"] = start_to
+                if query:
+                    params["query"] = query
+                if page_token:
+                    params["pageTokenString"] = page_token
+                
+                logger.info(f"Fetching Kontur Talk recordings (page {page_count})")
+                response = await client.get(url, params=params)
+                response.raise_for_status()
+                data = response.json()
+                
+                entities = data.get("entities", [])
+                
+                for entity in entities:
+                    recording = Recording(
+                        key=entity.get("key", ""),
+                        title=entity.get("title", ""),
+                        created_date=entity.get("createdDate", ""),
+                        room_name=entity.get("roomName", ""),
+                        duration=entity.get("duration", 0),
+                        recording_id=entity.get("key", ""),  # Алиас
+                        meeting_id=entity.get("roomName", "")  # Алиас
+                    )
+                    all_recordings.append(recording)
+                
+                page_token = data.get("nextPageToken")
+                if not page_token:
+                    break
+            
+            logger.info(f"Fetched {len(all_recordings)} recordings from Kontur Talk ({page_count} pages)")
+            return all_recordings
+            
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error fetching recordings: {e.response.status_code} - {e.response.text}")
+            return []
+        except Exception as e:
+            logger.exception(f"Error fetching recordings from Kontur Talk: {e}")
+            return []
     
     async def get_recording(self, recording_id: str) -> Optional[Recording]:
         """
         Получить информацию о записи по ID.
         
-        ЗАГЛУШКА: Возвращает mock-данные.
-        
         Args:
-            recording_id: ID записи в Kontur Talk
+            recording_id: ID (ключ) записи в Kontur Talk
             
         Returns:
             Recording или None если не найдена
         """
-        logger.info(f"[STUB] Getting recording: {recording_id}")
+        # Используем list_recordings с фильтром, так как API может не иметь отдельного endpoint
+        recordings = await self.list_recordings(limit=1000, days_back=90)
         
-        # TODO: Реализовать реальный запрос к API
-        # client = await self._get_client()
-        # response = await client.get(f"/recordings/{recording_id}")
-        # ...
+        for recording in recordings:
+            if recording.recording_id == recording_id or recording.key == recording_id:
+                return recording
         
-        # Mock response
-        return Recording(
-            recording_id=recording_id,
-            meeting_id=f"meet_{recording_id[-6:]}",
-            duration=3600,
-            download_url=f"https://stub.kontur.ru/recordings/{recording_id}/download",
-            title="Mock Meeting Recording",
-            created_at="2025-12-12T18:00:00Z"
-        )
+        logger.warning(f"Recording not found: {recording_id}")
+        return None
     
-    async def download_recording(self, recording_id: str, destination_path: str) -> bool:
+    async def download_recording(
+        self,
+        recording_key: str,
+        destination_path: str,
+        quality: str = "900p"
+    ) -> bool:
         """
-        Скачать запись по ID.
-        
-        ЗАГЛУШКА: Не выполняет реального скачивания.
+        Скачать запись по ключу.
         
         Args:
-            recording_id: ID записи
+            recording_key: Ключ записи (key из API)
             destination_path: Путь для сохранения файла
+            quality: Качество видео (например, "900p", "720p", "480p")
             
         Returns:
             True если скачивание успешно
         """
-        logger.info(f"[STUB] Downloading recording {recording_id} to {destination_path}")
+        if not self.api_url or not self.api_key:
+            logger.error("Kontur Talk API not configured")
+            return False
         
-        # TODO: Реализовать реальное скачивание
-        # recording = await self.get_recording(recording_id)
-        # if not recording:
-        #     return False
-        # 
-        # client = await self._get_client()
-        # async with client.stream("GET", recording.download_url) as response:
-        #     with open(destination_path, "wb") as f:
-        #         async for chunk in response.aiter_bytes():
-        #             f.write(chunk)
+        url = f"{self.api_url.rstrip('/')}/api/Recordings/{recording_key}/file/{quality}"
         
-        return True
-    
-    async def list_recordings(
-        self,
-        limit: int = 20,
-        offset: int = 0,
-        from_date: Optional[str] = None,
-        to_date: Optional[str] = None
-    ) -> list[Recording]:
-        """
-        Получить список записей.
-        
-        ЗАГЛУШКА: Возвращает пустой список.
-        
-        Args:
-            limit: Максимальное количество записей
-            offset: Смещение для пагинации
-            from_date: Начальная дата (ISO format)
-            to_date: Конечная дата (ISO format)
+        try:
+            client = await self._get_client()
             
-        Returns:
-            Список записей
-        """
-        logger.info(f"[STUB] Listing recordings: limit={limit}, offset={offset}")
-        
-        # TODO: Реализовать реальный запрос к API
-        # client = await self._get_client()
-        # params = {"limit": limit, "offset": offset}
-        # if from_date:
-        #     params["from"] = from_date
-        # if to_date:
-        #     params["to"] = to_date
-        # response = await client.get("/recordings", params=params)
-        # ...
-        
-        return []
+            logger.info(f"Downloading recording {recording_key} (quality: {quality})")
+            
+            # Создаем директорию если не существует
+            Path(destination_path).parent.mkdir(parents=True, exist_ok=True)
+            
+            # Скачиваем файл с streaming
+            async with client.stream("GET", url) as response:
+                response.raise_for_status()
+                
+                total_size = int(response.headers.get("content-length", 0))
+                downloaded = 0
+                
+                with open(destination_path, "wb") as f:
+                    async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):  # 1MB chunks
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            
+                            if total_size > 0:
+                                percent = (downloaded / total_size) * 100
+                                if downloaded % (10 * 1024 * 1024) == 0:  # Логируем каждые 10MB
+                                    logger.debug(f"Downloaded {percent:.1f}% ({downloaded}/{total_size} bytes)")
+            
+            logger.info(f"Recording downloaded successfully: {destination_path} ({downloaded} bytes)")
+            return True
+            
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error downloading recording {recording_key}: {e.response.status_code} - {e.response.text}")
+            return False
+        except Exception as e:
+            logger.exception(f"Error downloading recording {recording_key}: {e}")
+            return False
     
     async def close(self):
         """Закрыть HTTP клиент."""

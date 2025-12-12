@@ -294,3 +294,6 @@ secrets/
 *.db
 *.sqlite
 *.sqlite3
+
+
+*.ipynb

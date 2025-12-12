@@ -1,7 +1,7 @@
 """
 Роутер для интеграции с Kontur Talk.
 """
-from fastapi import APIRouter, Depends, HTTPException, Header, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 import logging
 import os
@@ -30,7 +30,6 @@ router = APIRouter(prefix="/api/v1/kontur-talk", tags=["kontur-talk"])
     response_model=TaskCreateResponse,
     responses={
         400: {"model": ErrorResponse, "description": "Invalid request"},
-        401: {"model": ErrorResponse, "description": "Invalid signature"},
         500: {"model": ErrorResponse, "description": "Server error"}
     },
     summary="Webhook от Kontur Talk",
@@ -39,7 +38,6 @@ router = APIRouter(prefix="/api/v1/kontur-talk", tags=["kontur-talk"])
 async def kontur_talk_webhook(
     request: Request,
     webhook_data: KonturTalkWebhookRequest,
-    x_kontur_signature: str = Header(default="", alias="X-Kontur-Signature"),
     db: Session = Depends(get_db)
 ):
     """
@@ -47,18 +45,8 @@ async def kontur_talk_webhook(
     
     Принимает события:
     - **recording.completed**: Новая запись готова к обработке
-    
-    Проверяет подпись запроса через X-Kontur-Signature header.
     """
     logger.info(f"Received webhook: event={webhook_data.event}, recording_id={webhook_data.recording_id}")
-    
-    # Проверяем подпись
-    kontur_client = get_kontur_talk_client()
-    body = await request.body()
-    
-    if not kontur_client.verify_webhook_signature(body, x_kontur_signature):
-        logger.warning(f"Invalid webhook signature for recording {webhook_data.recording_id}")
-        raise HTTPException(status_code=401, detail="Invalid signature")
     
     # Обрабатываем только события завершения записи
     if webhook_data.event != "recording.completed":
@@ -68,6 +56,7 @@ async def kontur_talk_webhook(
             status=TaskStatus.QUEUED,
         )
     
+    kontur_client = get_kontur_talk_client()
     db_service = DatabaseService(db)
     
     try:
@@ -80,14 +69,15 @@ async def kontur_talk_webhook(
         )
         inc_task_created(TaskSource.KONTUR_TALK.value)
         
-        # Скачиваем запись (заглушка)
+        # Скачиваем запись
         upload_dir = settings.upload_dir
         os.makedirs(upload_dir, exist_ok=True)
         file_path = os.path.join(upload_dir, f"{task.id}.mp4")
         
         download_success = await kontur_client.download_recording(
             webhook_data.recording_id,
-            file_path
+            file_path,
+            quality="900p"
         )
         
         if not download_success:
@@ -122,7 +112,7 @@ async def kontur_talk_webhook(
             )
             raise HTTPException(status_code=500, detail="Failed to queue task")
         
-        logger.info(f"Task created from Kontur Talk: {task.id}")
+        logger.info(f"Task created from Kontur Talk webhook: {task.id}")
         
         return TaskCreateResponse(
             task_id=task.id,
@@ -140,28 +130,36 @@ async def kontur_talk_webhook(
 @router.get(
     "/recordings",
     summary="Получить список записей из Kontur Talk",
-    description="Возвращает список доступных записей из Kontur Talk (заглушка)."
+    description="Возвращает список доступных записей из Kontur Talk за последние N дней."
 )
 async def list_kontur_talk_recordings(
-    limit: int = 20,
-    offset: int = 0
+    days_back: int = 7,
+    limit: int = 100,
+    query: str = None
 ):
     """
     Получить список записей из Kontur Talk.
     
-    ЗАГЛУШКА: Возвращает пустой список.
+    - **days_back**: Количество дней назад для поиска (по умолчанию 7)
+    - **limit**: Количество записей на страницу (по умолчанию 100)
+    - **query**: Поисковый запрос (опционально)
     """
     kontur_client = get_kontur_talk_client()
-    recordings = await kontur_client.list_recordings(limit=limit, offset=offset)
+    recordings = await kontur_client.list_recordings(
+        limit=limit,
+        days_back=days_back,
+        query=query
+    )
     
     return {
         "recordings": [
             {
-                "recording_id": r.recording_id,
-                "meeting_id": r.meeting_id,
-                "duration": r.duration,
+                "key": r.key,
+                "recording_id": r.key,  # Алиас для обратной совместимости с UI
                 "title": r.title,
-                "created_at": r.created_at
+                "created_date": r.created_date,
+                "room_name": r.room_name,
+                "duration": r.duration
             }
             for r in recordings
         ],
@@ -173,16 +171,18 @@ async def list_kontur_talk_recordings(
     "/recordings/{recording_id}/process",
     response_model=TaskCreateResponse,
     summary="Запустить обработку записи вручную",
-    description="Запускает обработку конкретной записи из Kontur Talk."
+    description="Запускает обработку конкретной записи из Kontur Talk по ID."
 )
 async def process_kontur_talk_recording(
     recording_id: str,
+    quality: str = "900p",
     db: Session = Depends(get_db)
 ):
     """
     Запустить обработку записи из Kontur Talk вручную.
     
-    - **recording_id**: ID записи в Kontur Talk
+    - **recording_id**: ID (ключ) записи в Kontur Talk
+    - **quality**: Качество видео для скачивания (900p, 720p, 480p)
     """
     kontur_client = get_kontur_talk_client()
     
@@ -194,41 +194,63 @@ async def process_kontur_talk_recording(
     
     db_service = DatabaseService(db)
     
-    # Создаем задачу
-    task = db_service.create_task(
-        source=TaskSource.KONTUR_TALK,
-        meeting_id=recording.meeting_id,
-        recording_id=recording.recording_id,
-        language="auto"
-    )
-    inc_task_created(TaskSource.KONTUR_TALK.value)
-    
-    # Скачиваем запись
-    upload_dir = settings.upload_dir
-    os.makedirs(upload_dir, exist_ok=True)
-    file_path = os.path.join(upload_dir, f"{task.id}.mp4")
-    
-    download_success = await kontur_client.download_recording(recording_id, file_path)
-    
-    if not download_success:
-        db_service.update_task_status(
-            task.id,
-            TaskStatus.FAILED,
-            error_message="Failed to download recording"
+    try:
+        # Создаем задачу
+        task = db_service.create_task(
+            source=TaskSource.KONTUR_TALK,
+            meeting_id=recording.meeting_id,
+            recording_id=recording.recording_id,
+            language="auto"
         )
-        raise HTTPException(status_code=500, detail="Failed to download recording")
-    
-    # Обновляем задачу
-    task.file_path = file_path
-    task.duration_seconds = recording.duration
-    db.commit()
-    
-    # Отправляем в Kafka
-    kafka_producer = get_kafka_producer()
-    inc_kafka_enqueue("audio-topic", kafka_producer.send_audio_task(task.id, file_path, "auto"))
-    
-    return TaskCreateResponse(
-        task_id=task.id,
-        status=TaskStatus.QUEUED,
-        created_at=task.created_at
-    )
+        inc_task_created(TaskSource.KONTUR_TALK.value)
+        
+        # Скачиваем запись
+        upload_dir = settings.upload_dir
+        os.makedirs(upload_dir, exist_ok=True)
+        file_path = os.path.join(upload_dir, f"{task.id}.mp4")
+        
+        download_success = await kontur_client.download_recording(
+            recording_id,
+            file_path,
+            quality=quality
+        )
+        
+        if not download_success:
+            db_service.update_task_status(
+                task.id,
+                TaskStatus.FAILED,
+                error_message="Failed to download recording"
+            )
+            raise HTTPException(status_code=500, detail="Failed to download recording")
+        
+        # Обновляем задачу
+        task.file_path = file_path
+        task.duration_seconds = recording.duration
+        db.commit()
+        
+        # Отправляем в Kafka
+        kafka_producer = get_kafka_producer()
+        success = kafka_producer.send_audio_task(task.id, file_path, "auto")
+        inc_kafka_enqueue("audio-topic", success)
+        
+        if not success:
+            db_service.update_task_status(
+                task.id,
+                TaskStatus.FAILED,
+                error_message="Failed to queue task"
+            )
+            raise HTTPException(status_code=500, detail="Failed to queue task")
+        
+        logger.info(f"Task created from manual request: {task.id} (recording: {recording_id})")
+        
+        return TaskCreateResponse(
+            task_id=task.id,
+            status=TaskStatus.QUEUED,
+            created_at=task.created_at
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error processing recording {recording_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
