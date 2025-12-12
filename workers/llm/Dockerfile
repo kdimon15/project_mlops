@@ -19,7 +19,7 @@ ARG LLM_MODEL_ID=google/gemma-2b
 ARG LLM_MODEL_REVISION=main
 RUN python - <<'PY'
 import os
-import subprocess
+from huggingface_hub import snapshot_download
 
 model_id = os.getenv("LLM_MODEL_ID", "google/gemma-2b")
 revision = os.getenv("LLM_MODEL_REVISION", "main")
@@ -28,21 +28,16 @@ token = os.getenv("HF_TOKEN", "")
 if not token:
     raise SystemExit("HF_TOKEN обязателен для загрузки модели gemma-2b (доступ ограничен)")
 
-cmd = [
-    "huggingface-cli",
-    "download",
-    model_id,
-    "--revision",
-    revision,
-    "--local-dir",
-    f"/root/.cache/huggingface/hub/models--{model_id.replace('/', '--')}",
-    "--resume-download",
-]
-if token:
-    cmd.extend(["--token", token])
-
 print("Downloading", model_id, "rev", revision)
-subprocess.check_call(cmd)
+snapshot_download(
+    repo_id=model_id,
+    revision=revision,
+    local_dir=f"/root/.cache/huggingface/hub/models--{model_id.replace('/', '--')}",
+    resume_download=True,
+    token=token,
+    allow_patterns=["*"],
+    ignore_patterns=["*.gguf"],
+)
 PY
 
 ENV KAFKA_BOOTSTRAP_SERVERS=kafka:9092
