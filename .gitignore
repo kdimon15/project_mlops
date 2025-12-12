@@ -138,10 +138,6 @@ cython_debug/
 *.bin
 *.safetensors
 
-# Model directories
-models/
-checkpoints/
-weights/
 
 # Data files
 data/
