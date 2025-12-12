@@ -88,13 +88,13 @@ class KonturTalkClient:
             start_from = (now - timedelta(days=days_back)).strftime("%Y-%m-%dT%H:%M:%SZ")
             start_to = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         
-            url = f"{self.api_url.rstrip('/')}/api/Domain/recordings/v2"
-            client = await self._get_client()
-            
-            page_token = None
-            all_recordings = []
+        url = f"{self.api_url.rstrip('/')}/api/Domain/recordings/v2"
+        client = await self._get_client()
+        
+        page_token = None
+        all_recordings = []
         page_count = 0
-            
+        
         try:
             while True:
                 page_count += 1

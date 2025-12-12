@@ -65,40 +65,13 @@ class KafkaProducerService:
         
         return self._send(settings.kafka_audio_topic, task_id, message)
     
-    def send_diarization_task(
-        self, 
-        task_id: str, 
-        file_path: str, 
-        transcription_segments: list = None
-    ) -> bool:
-        """
-        Отправить задачу на диаризацию в diarization-topic.
-        
-        Args:
-            task_id: ID задачи
-            file_path: Путь к аудио файлу
-            transcription_segments: Сегменты транскрипции для привязки к спикерам
-            
-        Returns:
-            True если сообщение отправлено успешно
-        """
-        message = {
-            "task_id": task_id,
-            "file_path": file_path,
-            "transcription_segments": transcription_segments or [],
-            "action": "diarize"
-        }
-        
-        return self._send(settings.kafka_diarization_topic, task_id, message)
-    
-    def send_transcription_task(self, task_id: str, transcription: str, segments: list = None) -> bool:
+    def send_transcription_task(self, task_id: str, transcription: str) -> bool:
         """
         Отправить задачу на суммаризацию в transcription-topic.
         
         Args:
             task_id: ID задачи
             transcription: Текст транскрипции
-            segments: Сегменты транскрипции с информацией о спикерах (опционально)
             
         Returns:
             True если сообщение отправлено успешно
@@ -106,7 +79,6 @@ class KafkaProducerService:
         message = {
             "task_id": task_id,
             "transcription": transcription,
-            "segments": segments or [],
             "action": "summarize"
         }
         

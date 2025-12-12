@@ -147,28 +147,6 @@ class DatabaseService:
             self.db.refresh(task)
         return task
     
-    def update_segments_with_speakers(
-        self,
-        task_id: str,
-        segments_with_speakers: str
-    ) -> Optional[TaskModel]:
-        """
-        Обновить сегменты транскрипции с информацией о спикерах после диаризации.
-        
-        Args:
-            task_id: ID задачи
-            segments_with_speakers: JSON с сегментами включающими speaker
-            
-        Returns:
-            Обновленная задача или None
-        """
-        task = self.get_task(task_id)
-        if task:
-            task.transcription_segments = segments_with_speakers
-            self.db.commit()
-            self.db.refresh(task)
-        return task
-    
     def save_summary(
         self,
         task_id: str,

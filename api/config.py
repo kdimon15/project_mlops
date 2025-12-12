@@ -20,19 +20,12 @@ class Settings(BaseSettings):
     # Kafka
     kafka_bootstrap_servers: str = "kafka:9092"
     kafka_audio_topic: str = "audio-topic"
-    kafka_diarization_topic: str = "diarization-topic"
     kafka_transcription_topic: str = "transcription-topic"
     
     # LLM (OpenAI-compatible API via Ollama)
     llm_api_base_url: str = "http://ollama:11434/v1"
     llm_api_key: str = "ollama"  # Ollama не требует реального ключа
     llm_model: str = "gemma:2b"
-    
-    # Diarization (pyannote.audio)
-    pyannote_model: str = "pyannote/speaker-diarization-3.1"
-    pyannote_hf_token: str = ""  # Hugging Face token для доступа к моделям
-    diarization_min_speakers: int = 1
-    diarization_max_speakers: int = 10
     
     # Kontur Talk Integration
     kontur_talk_api_url: str = ""
