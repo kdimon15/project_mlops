@@ -11,8 +11,9 @@
 ### Решение
 **CallScribe** — MLOps-сервис, который автоматически:
 1. **Транскрибирует** аудио/видео звонки в текст (GigaAM)
-2. **Суммаризирует** содержание через LLM (Gemma 1.5B на Ollama)
-3. **Сохраняет** результаты для поиска и аналитики
+2. **Диаризирует** запись — определяет, кто и когда говорит (pyannote.audio)
+3. **Суммаризирует** содержание через LLM (Gemma 1.5B на Ollama)
+4. **Сохраняет** результаты для поиска и аналитики
 
 ### Интеграция с Kontur Talk
 Сервис интегрируется с **Kontur Talk** — корпоративной платформой для видеоконференций. Записи звонков автоматически передаются на обработку через API интеграцию.
@@ -44,11 +45,17 @@
 - Транскрипция с временными метками
 - Точность (WER) ≤ 15% на чистых записях
 
+### Диаризация (Speaker Diarization)
+- Автоматическое определение количества говорящих
+- Разметка временных интервалов для каждого спикера
+- Привязка реплик транскрипции к конкретным участникам
+- Поддержка до 10 одновременных говорящих
+
 ### Суммаризация (LLM)
 - Генерация краткого саммари (до 500 слов)
 - Выделение ключевых тезисов и решений
-- Определение участников и их высказываний
-- Формирование списка action items
+- Учет информации о говорящих из диаризации
+- Формирование списка action items с указанием ответственных
 
 ### Хранение и поиск
 - Сохранение транскрипций и саммари в PostgreSQL
@@ -95,7 +102,7 @@
 - Валидация MIME-type и размера файлов
 - Docker network isolation
 - Конфигурация через .env файлы
-- Аутентификация webhook-запросов от Kontur Talk
+- API ключ для интеграции с Kontur Talk
 
 ### Мониторинг
 - Prometheus metrics endpoint
@@ -133,17 +140,24 @@
 │       │                  │             └──────┬──────────────┬───────────┘      │
 │       │                  │                    │              │                  │
 │       │ upload           ▼                    ▼              ▼                  │
-│       │           ┌──────────────┐     ┌──────────┐   ┌──────────┐              │
-│       │           │              │     │  ASR     │   │   LLM    │              │
-│       └──────────▶│  PostgreSQL  │◀────│  Worker  │   │  Worker  │              │
-│                   │              │     │ (GigaAM)│    │ (Gemma)  │              │
-│                   └──────────────┘     └──────────┘   └──────────┘              │
-│                          │                                 │                    │
+│       │           ┌──────────────┐     ┌──────────┐   ┌────────────┐            │
+│       │           │              │     │  ASR     │   │ Diarization│            │
+│       └──────────▶│  PostgreSQL  │◀────│  Worker  │   │   Worker   │            │
+│                   │              │     │ (GigaAM) │   │ (pyannote) │            │
+│                   └──────────────┘     └──────────┘   └────────────┘            │
+│                          ▲                                 │                    │
 │                          │                                 ▼                    │
 │                          │                          ┌──────────┐                │
-│                          │                          │  Ollama  │                │
-│                          │                          │(Gemma1.5B)│               │
-│                          │                          └──────────┘                │
+│                          │                          │   LLM    │                │
+│                          └──────────────────────────│  Worker  │                │
+│                                                     │ (Gemma)  │                │
+│                                                     └──────────┘                │
+│                                                          │                      │
+│                                                          ▼                      │
+│                                                     ┌──────────┐                │
+│                                                     │  Ollama  │                │
+│                                                     │(Gemma1.5B)│               │
+│                                                     └──────────┘                │
 │                          ▼                                                      │
 │                   ┌──────────────┐     ┌──────────────┐                         │
 │                   │  Prometheus  │────▶│   Grafana    │                         │
@@ -169,6 +183,7 @@
 | **Kontur Talk Client** | Python | Интеграция с API Kontur Talk |
 | **Message Broker** | Kafka | Асинхронная очередь задач |
 | **ASR Worker** | GigaAM | Транскрибация аудио в текст |
+| **Diarization Worker** | pyannote.audio | Определение говорящих и временных меток |
 | **LLM Worker** | Gemma 1.5B (Ollama) | Суммаризация и извлечение тезисов |
 | **Database** | PostgreSQL | Хранение данных |
 | **Monitoring** | Prometheus + Grafana | Метрики и визуализация |
@@ -185,7 +200,8 @@
 - **httpx** — HTTP клиент для Kontur Talk API
 
 ### ML/AI
-- **GigaAM** (OpenAI) — ASR модель
+- **GigaAM** — ASR модель для транскрибации
+- **pyannote.audio** — модель для диаризации (определение говорящих)
 - **Gemma 1.5B** — LLM для суммаризации (локально через Ollama)
 - **Ollama** — локальный inference сервер для LLM
 - **FFmpeg** — обработка аудио/видео
@@ -239,6 +255,11 @@ project_mlops/
 │   │   ├── requirements.txt
 │   │   ├── worker.py
 │   │   └── GigaAM_model.py
+│   ├── diarization/
+│   │   ├── Dockerfile
+│   │   ├── requirements.txt
+│   │   ├── worker.py
+│   │   └── pyannote_model.py
 │   └── llm/
 │       ├── Dockerfile
 │       ├── requirements.txt
@@ -287,12 +308,11 @@ project_mlops/
 1. Получите API ключ в настройках Kontur Talk
 2. Добавьте в `.env`:
 ```env
-KONTUR_TALK_API_URL=https://api.kontur.ru/talk/v1
+KONTUR_TALK_API_URL=https://your-domain.ktalk.ru
 KONTUR_TALK_API_KEY=your_api_key
-KONTUR_TALK_WEBHOOK_SECRET=your_webhook_secret
 ```
 
-3. Настройте webhook в Kontur Talk:
+3. Настройте webhook в Kontur Talk (опционально):
    - URL: `https://your-domain.com/api/v1/kontur-talk/webhook`
    - События: `recording.completed`
 
@@ -355,14 +375,12 @@ language: ru
 ```http
 POST /api/v1/kontur-talk/webhook
 Content-Type: application/json
-X-Kontur-Signature: <signature>
 
 {
   "event": "recording.completed",
   "recording_id": "rec_123456",
   "meeting_id": "meet_789",
-  "duration": 3600,
-  "download_url": "https://..."
+  "duration": 3600
 }
 ```
 
@@ -373,6 +391,14 @@ X-Kontur-Signature: <signature>
   "source": "kontur_talk",
   "meeting_id": "meet_789",
   "transcription": "Полный текст транскрипции...",
+  "segments": [
+    {
+      "start": 0.0,
+      "end": 5.2,
+      "text": "Добрый день, коллеги",
+      "speaker": "SPEAKER_01"
+    }
+  ],
   "summary": "Краткое содержание звонка...",
   "key_points": ["Тезис 1", "Тезис 2"],
   "action_items": ["Задача 1", "Задача 2"]
