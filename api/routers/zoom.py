@@ -1,6 +1,7 @@
 """
 Роутер для интеграции с Zoom (получение записей и запуск обработки).
 """
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import logging
@@ -80,7 +81,9 @@ async def process_zoom_recording(
     download_ok = await zoom_client.download_recording(request.download_url, file_path)
     if not download_ok:
         db_service.update_task_status(
-            task.id, TaskStatus.FAILED, error_message="Failed to download Zoom recording"
+            task.id,
+            TaskStatus.FAILED,
+            error_message="Failed to download Zoom recording",
         )
         raise HTTPException(status_code=500, detail="Failed to download recording")
 
@@ -109,4 +112,3 @@ async def process_zoom_recording(
         status=TaskStatus.QUEUED,
         created_at=task.created_at,
     )
-

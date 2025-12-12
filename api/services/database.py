@@ -25,8 +25,14 @@ class TaskModel(Base):
     __tablename__ = "tasks"
     
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    status = Column(SQLEnum(TaskStatus), default=TaskStatus.QUEUED)
-    source = Column(SQLEnum(TaskSource), default=TaskSource.UPLOAD)
+    status = Column(
+        SQLEnum(TaskStatus, values_callable=lambda obj: [e.value for e in obj], name="taskstatus"),
+        default=TaskStatus.QUEUED.value,
+    )
+    source = Column(
+        SQLEnum(TaskSource, values_callable=lambda obj: [e.value for e in obj], name="tasksource"),
+        default=TaskSource.UPLOAD.value,
+    )
     progress = Column(Integer, default=0)
     
     # Kontur Talk metadata
@@ -81,7 +87,8 @@ class DatabaseService:
     ) -> TaskModel:
         """Создать новую задачу."""
         task = TaskModel(
-            source=source,
+            status=TaskStatus.QUEUED.value,
+            source=source.value if isinstance(source, TaskSource) else source,
             filename=filename,
             file_path=file_path,
             meeting_id=meeting_id,
@@ -107,7 +114,7 @@ class DatabaseService:
         """Обновить статус задачи."""
         task = self.get_task(task_id)
         if task:
-            task.status = status
+            task.status = status.value if isinstance(status, TaskStatus) else status
             if progress is not None:
                 task.progress = progress
             if error_message:
@@ -116,7 +123,7 @@ class DatabaseService:
                 task.completed_at = datetime.utcnow()
             self.db.commit()
             self.db.refresh(task)
-            inc_task_status(status.value)
+            inc_task_status(status.value if isinstance(status, TaskStatus) else str(status))
         return task
     
     def save_transcription(

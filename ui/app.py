@@ -317,6 +317,18 @@ def main() -> None:
     st.set_page_config(page_title="CallScribe UI", layout="wide")
     hero()
 
+    swagger_url = f"{API_BASE_URL.replace('http://api:8000', 'http://localhost:8000').rstrip('/')}/docs"
+    st.markdown(
+        f"""
+        <div style="padding:8px 12px; background:#0f172a; border-radius:10px; display:inline-block;">
+          <span style="margin-right:8px;">🔗</span>
+          <strong>Swagger UI:</strong>
+          <a href="{swagger_url}" target="_blank" style="color:#38bdf8;">{swagger_url}</a>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.markdown("---")
     created_task = layout_creator()
     if created_task:
