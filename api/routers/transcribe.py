@@ -16,6 +16,7 @@ from api.services.database import get_db, DatabaseService
 from api.services.kafka_producer import get_kafka_producer
 from api.utils.file_utils import save_upload_file
 from api.config import get_settings
+from api.metrics import inc_task_created, inc_kafka_enqueue
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ async def transcribe_file(
             filename=file.filename,
             language=language.value
         )
+        inc_task_created(TaskSource.UPLOAD.value)
         
         # Сохраняем файл
         file_path = await save_upload_file(file, task.id)
@@ -73,6 +75,7 @@ async def transcribe_file(
             file_path=file_path,
             language=language.value
         )
+        inc_kafka_enqueue("audio-topic", success)
         
         if not success:
             logger.error(f"Failed to send task {task.id} to Kafka")

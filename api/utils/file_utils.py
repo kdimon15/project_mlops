@@ -10,6 +10,7 @@ from typing import Optional
 from fastapi import UploadFile, HTTPException
 
 from api.config import get_settings
+from api.metrics import observe_upload_size
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -134,6 +135,7 @@ async def save_upload_file(file: UploadFile, task_id: str) -> str:
             validate_file_size(total_size)
             f.write(chunk)
     
+    observe_upload_size(total_size)
     logger.info(f"File saved: {file_path} ({total_size} bytes)")
     return str(file_path)
 

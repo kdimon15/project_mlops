@@ -17,6 +17,7 @@ from api.services.database import get_db, DatabaseService
 from api.services.kafka_producer import get_kafka_producer
 from api.services.kontur_talk_client import get_kontur_talk_client
 from api.config import get_settings
+from api.metrics import inc_task_created, inc_kafka_enqueue
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -77,6 +78,7 @@ async def kontur_talk_webhook(
             recording_id=webhook_data.recording_id,
             language="auto"
         )
+        inc_task_created(TaskSource.KONTUR_TALK.value)
         
         # Скачиваем запись (заглушка)
         upload_dir = settings.upload_dir
@@ -109,6 +111,7 @@ async def kontur_talk_webhook(
             file_path=file_path,
             language="auto"
         )
+        inc_kafka_enqueue("audio-topic", success)
         
         if not success:
             logger.error(f"Failed to send task {task.id} to Kafka")
@@ -198,6 +201,7 @@ async def process_kontur_talk_recording(
         recording_id=recording.recording_id,
         language="auto"
     )
+    inc_task_created(TaskSource.KONTUR_TALK.value)
     
     # Скачиваем запись
     upload_dir = settings.upload_dir
@@ -221,7 +225,7 @@ async def process_kontur_talk_recording(
     
     # Отправляем в Kafka
     kafka_producer = get_kafka_producer()
-    kafka_producer.send_audio_task(task.id, file_path, "auto")
+    inc_kafka_enqueue("audio-topic", kafka_producer.send_audio_task(task.id, file_path, "auto"))
     
     return TaskCreateResponse(
         task_id=task.id,

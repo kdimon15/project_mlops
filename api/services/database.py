@@ -10,6 +10,7 @@ import uuid
 
 from api.config import get_settings
 from api.models.schemas import TaskStatus, TaskSource
+from api.metrics import inc_task_status
 
 settings = get_settings()
 
@@ -115,6 +116,7 @@ class DatabaseService:
                 task.completed_at = datetime.utcnow()
             self.db.commit()
             self.db.refresh(task)
+            inc_task_status(status.value)
         return task
     
     def save_transcription(
