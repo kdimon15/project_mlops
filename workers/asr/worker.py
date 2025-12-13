@@ -166,9 +166,10 @@ def main():
     logger.info("Starting ASR worker. Subscribing to %s", AUDIO_TOPIC)
     consumer = KafkaConsumer(
         AUDIO_TOPIC,
+        group_id="asr-worker",
         bootstrap_servers=KAFKA_SERVERS.split(","),
         value_deserializer=lambda v: json.loads(v.decode("utf-8")),
-        auto_offset_reset="earliest",
+        auto_offset_reset="latest",
         enable_auto_commit=True,
     )
     producer = KafkaProducer(
@@ -264,6 +265,13 @@ def main():
         except Exception as e:
             logger.exception("Failed to process task %s: %s", task_id, e)
             update_task(task_id, status="failed")
+        finally:
+            if file_path and os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                    logger.info("Deleted processed file %s", file_path)
+                except Exception as exc:
+                    logger.warning("Failed to delete file %s: %s", file_path, exc)
         time.sleep(0.1)
 
 

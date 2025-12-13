@@ -124,9 +124,10 @@ def main():
     logger.info("Starting LLM worker. Subscribing to %s", TRANSCRIPTION_TOPIC)
     consumer = KafkaConsumer(
         TRANSCRIPTION_TOPIC,
+        group_id="llm-worker",
         bootstrap_servers=KAFKA_SERVERS.split(","),
         value_deserializer=lambda v: json.loads(v.decode("utf-8")),
-        auto_offset_reset="earliest",
+        auto_offset_reset="latest",
         enable_auto_commit=True,
     )
 

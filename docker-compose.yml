@@ -54,19 +54,19 @@ services:
     env_file:
       - .env
     environment:
-      APP_NAME: "CallScribe API"
-      APP_VERSION: "1.0.0"
-      DEBUG: "False"
-      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/callscribe"
-      KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
-      KAFKA_AUDIO_TOPIC: "audio-topic"
-      KAFKA_TRANSCRIPTION_TOPIC: "transcription-topic"
-      LLM_API_BASE_URL: ${LLM_API_BASE_URL:-http://ollama:11434}
-      LLM_API_KEY: "ollama"
-      LLM_MODEL: ${LLM_MODEL:-gemma3:1b}
-      MAX_FILE_SIZE_MB: 500
-      UPLOAD_DIR: "/tmp/uploads"
-      METRICS_ENABLED: "True"
+      APP_NAME: ${APP_NAME}
+      APP_VERSION: ${APP_VERSION}
+      DEBUG: ${DEBUG}
+      DATABASE_URL: ${DATABASE_URL}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_AUDIO_TOPIC: ${KAFKA_AUDIO_TOPIC}
+      KAFKA_TRANSCRIPTION_TOPIC: ${KAFKA_TRANSCRIPTION_TOPIC}
+      LLM_API_BASE_URL: ${LLM_API_BASE_URL}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL}
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB}
+      UPLOAD_DIR: ${UPLOAD_DIR}
+      METRICS_ENABLED: ${METRICS_ENABLED}
     depends_on:
       kafka:
         condition: service_healthy
@@ -119,7 +119,7 @@ services:
     env_file:
       - .env
     environment:
-      API_BASE_URL: http://api:8000
+      API_BASE_URL: ${API_BASE_URL}
     ports:
       - "8501:8501"
     depends_on:
@@ -141,8 +141,8 @@ services:
       KAFKA_AUDIO_TOPIC: ${KAFKA_AUDIO_TOPIC}
       KAFKA_TRANSCRIPTION_TOPIC: ${KAFKA_TRANSCRIPTION_TOPIC}
       HF_TOKEN: ${HF_TOKEN}
-      ASR_MODEL_ID: ${ASR_MODEL_ID:-ai-sage/GigaAM-v3}
-      ASR_MODEL_REVISION: ${ASR_MODEL_REVISION:-e2e_rnnt}
+      ASR_MODEL_ID: ${ASR_MODEL_ID}
+      ASR_MODEL_REVISION: ${ASR_MODEL_REVISION}
     volumes:
       - uploads:/tmp/uploads
     depends_on:
@@ -166,8 +166,8 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
       KAFKA_TRANSCRIPTION_TOPIC: ${KAFKA_TRANSCRIPTION_TOPIC}
       HF_TOKEN: ${HF_TOKEN}
-      LLM_API_BASE_URL: ${LLM_API_BASE_URL:-http://ollama:11434}
-      LLM_MODEL: ${LLM_MODEL:-gemma3:1b}
+      LLM_API_BASE_URL: ${LLM_API_BASE_URL}
+      LLM_MODEL: ${LLM_MODEL}
     depends_on:
       kafka:
         condition: service_healthy
@@ -192,4 +192,3 @@ volumes:
   pgdata:
   uploads:
   ollama:
-

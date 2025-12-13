@@ -15,16 +15,6 @@ def client() -> httpx.Client:
     return httpx.Client(base_url=API_BASE_URL, timeout=20.0)
 
 
-def copy_button(label: str, text: str) -> None:
-    escaped = json.dumps(text)
-    btn = f"""
-    <button class="copy-btn" onclick='navigator.clipboard.writeText({escaped});'>
-      📋 {label}
-    </button>
-    """
-    st.markdown(btn, unsafe_allow_html=True)
-
-
 def hero() -> None:
     st.markdown(
         """
@@ -328,18 +318,13 @@ def layout_results(task_id: Optional[str]) -> None:
     with tabs[0]:
         transcript = data.get("transcription", "") or ""
         st.subheader("Полный текст транскрипции")
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            copy_button("Копировать", transcript)
-            st.download_button(
-                "⬇️ Скачать .txt",
-                data=transcript,
-                file_name=f"{task_id}-transcript.txt",
-                mime="text/plain",
-                key=f"dl-transcript-{task_id}",
-            )
-        with col2:
-            st.caption("Можно копировать или скачать как txt.")
+        st.download_button(
+            "⬇️ Скачать .txt",
+            data=transcript,
+            file_name=f"{task_id}-transcript.txt",
+            mime="text/plain",
+            key=f"dl-transcript-{task_id}",
+        )
         st.text_area("", transcript, height=260, key=f"ta-{task_id}-transcript")
     with tabs[1]:
         summary_md = f"**Summary:** {summary_val}"
@@ -350,19 +335,13 @@ def layout_results(task_id: Optional[str]) -> None:
         summary_text = f"Summary: {summary_val}"
         if key_points:
             summary_text += "\n\nКлючевые пункты:\n" + "\n".join(f"- {kp}" for kp in key_points)
-        # Кнопки копирования/скачивания без дублирования текста
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            copy_button("Копировать", summary_text)
-            st.download_button(
-                "⬇️ Скачать .txt",
-                data=summary_text,
-                file_name=f"{task_id}-summary.txt",
-                mime="text/plain",
-                key=f"dl-summary-{task_id}",
-            )
-        with col2:
-            st.caption("Можно копировать или скачать как txt.")
+        st.download_button(
+            "⬇️ Скачать .txt",
+            data=summary_text,
+            file_name=f"{task_id}-summary.txt",
+            mime="text/plain",
+            key=f"dl-summary-{task_id}",
+        )
     with tabs[2]:
         items = action_items or []
         todo_text = (
@@ -371,18 +350,13 @@ def layout_results(task_id: Optional[str]) -> None:
             else "Нет action items"
         )
         st.subheader("TODO / Action items")
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            copy_button("Копировать", todo_text)
-            st.download_button(
-                "⬇️ Скачать .txt",
-                data=todo_text,
-                file_name=f"{task_id}-todo.txt",
-                mime="text/plain",
-                key=f"dl-todo-{task_id}",
-            )
-        with col2:
-            st.caption("Можно копировать или скачать как txt.")
+        st.download_button(
+            "⬇️ Скачать .txt",
+            data=todo_text,
+            file_name=f"{task_id}-todo.txt",
+            mime="text/plain",
+            key=f"dl-todo-{task_id}",
+        )
         st.text_area("", todo_text, height=220, key=f"ta-{task_id}-todo")
 
 
