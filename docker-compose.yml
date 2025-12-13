@@ -63,7 +63,7 @@ services:
       KAFKA_TRANSCRIPTION_TOPIC: "transcription-topic"
       LLM_API_BASE_URL: ${LLM_API_BASE_URL:-http://ollama:11434}
       LLM_API_KEY: "ollama"
-      LLM_MODEL: ${LLM_MODEL:-gemma3:1b-it}
+      LLM_MODEL: ${LLM_MODEL:-gemma3:1b}
       MAX_FILE_SIZE_MB: 500
       UPLOAD_DIR: "/tmp/uploads"
       METRICS_ENABLED: "True"
@@ -167,7 +167,7 @@ services:
       KAFKA_TRANSCRIPTION_TOPIC: ${KAFKA_TRANSCRIPTION_TOPIC}
       HF_TOKEN: ${HF_TOKEN}
       LLM_API_BASE_URL: ${LLM_API_BASE_URL:-http://ollama:11434}
-      LLM_MODEL: ${LLM_MODEL:-gemma3:1b-it}
+      LLM_MODEL: ${LLM_MODEL:-gemma3:1b}
     depends_on:
       kafka:
         condition: service_healthy
@@ -181,7 +181,7 @@ services:
     container_name: ollama
     environment:
       OLLAMA_HOST: 0.0.0.0
-      LLM_MODEL: ${LLM_MODEL:-gemma3:1b-it}
+      LLM_MODEL: ${LLM_MODEL:-gemma3:1b}
     volumes:
       - ollama:/root/.ollama
     ports:
