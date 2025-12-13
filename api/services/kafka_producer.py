@@ -65,25 +65,6 @@ class KafkaProducerService:
         
         return self._send(settings.kafka_audio_topic, task_id, message)
     
-    def send_transcription_task(self, task_id: str, transcription: str) -> bool:
-        """
-        Отправить задачу на суммаризацию в transcription-topic.
-        
-        Args:
-            task_id: ID задачи
-            transcription: Текст транскрипции
-            
-        Returns:
-            True если сообщение отправлено успешно
-        """
-        message = {
-            "task_id": task_id,
-            "transcription": transcription,
-            "action": "summarize"
-        }
-        
-        return self._send(settings.kafka_transcription_topic, task_id, message)
-    
     def _send(self, topic: str, key: str, message: dict) -> bool:
         """Отправить сообщение в топик."""
         try:

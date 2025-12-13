@@ -25,23 +25,6 @@ def copy_button(label: str, text: str) -> None:
     st.markdown(btn, unsafe_allow_html=True)
 
 
-def render_block(title: str, text: str, key_prefix: str) -> None:
-    st.subheader(title)
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        copy_button("Копировать", text)
-        st.download_button(
-            "⬇️ Скачать .txt",
-            data=text,
-            file_name=f"{key_prefix}.txt",
-            mime="text/plain",
-            key=f"dl-{key_prefix}",
-        )
-    with col2:
-        st.caption("Можно копировать или скачать как txt.")
-    st.text_area("", text, height=260, key=f"ta-{key_prefix}")
-
-
 def hero() -> None:
     st.markdown(
         """
@@ -409,7 +392,7 @@ def main() -> None:
     if "last_task_id" not in st.session_state:
         st.session_state["last_task_id"] = None
 
-    swagger_url = f"{API_BASE_URL.replace('http://api:8000', 'http://localhost:8000').rstrip('/')}/docs"
+    swagger_url = f"{API_BASE_URL.rstrip('/')}/docs"
     st.markdown(
         f"""
         <div style="padding:8px 12px; background:#0f172a; border-radius:10px; display:inline-block;">

@@ -15,6 +15,12 @@ from huggingface_hub import login
 from kafka import KafkaConsumer, KafkaProducer
 from transformers import AutoModel
 
+try:
+    from api.metrics import inc_task_status
+except Exception:
+    def inc_task_status(_: str) -> None:  # fallback no-op
+        return None
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("asr-worker")
 
@@ -43,7 +49,15 @@ def db_connect():
     )
 
 
-def update_task(task_id: str, status: str = None, progress: int = None, transcription: str = None, language: str = None):
+def update_task(
+    task_id: str,
+    status: str = None,
+    progress: int = None,
+    transcription: str = None,
+    language: str = None,
+    duration_seconds: float = None,
+    segments: str = None,
+):
     conn = db_connect()
     try:
         with conn:
@@ -53,6 +67,7 @@ def update_task(task_id: str, status: str = None, progress: int = None, transcri
                 if status:
                     fields.append("status = %(status)s")
                     params["status"] = status
+                    inc_task_status(status)
                 if progress is not None:
                     fields.append("progress = %(progress)s")
                     params["progress"] = progress
@@ -62,6 +77,14 @@ def update_task(task_id: str, status: str = None, progress: int = None, transcri
                 if language is not None:
                     fields.append("language = %(language)s")
                     params["language"] = language
+                if duration_seconds is not None:
+                    fields.append("duration_seconds = %(duration_seconds)s")
+                    params["duration_seconds"] = int(duration_seconds)
+                if segments is not None:
+                    fields.append("transcription_segments = %(segments)s")
+                    params["segments"] = segments
+                if status in {"completed", "failed"}:
+                    fields.append("completed_at = %(updated_at)s")
                 if fields:
                     params["task_id"] = task_id
                     cur.execute(
@@ -112,7 +135,7 @@ def get_duration(path: str) -> float:
         return 0.0
 
 
-def split_audio(path: str, segment_seconds: int) -> list[str]:
+def split_audio(path: str, segment_seconds: int) -> tuple[list[str], str]:
     tmp_dir = tempfile.mkdtemp(prefix="asr_segments_")
     out_tpl = os.path.join(tmp_dir, "seg_%03d.wav")
     cmd = [
@@ -167,13 +190,18 @@ def main():
             continue
 
         try:
-            update_task(task_id, status="processing", progress=25, language=language)
+            duration = get_duration(file_path)
+            update_task(
+                task_id,
+                status="processing",
+                progress=25,
+                language=language,
+                duration_seconds=duration,
+            )
 
             transcribe_kwargs = {}
             if language and language != "auto":
                 transcribe_kwargs["language"] = language
-
-            duration = get_duration(file_path)
 
             def transcribe_one(path: str) -> str:
                 text = asr_model.transcribe(path, **transcribe_kwargs)
@@ -201,9 +229,27 @@ def main():
             else:
                 transcription = transcribe_one(file_path)
 
-            update_task(task_id, status="processing", progress=70, transcription=transcription, language=language)
+            segments_payload = json.dumps(
+                [
+                    {
+                        "start": 0.0,
+                        "end": duration or 0.0,
+                        "text": transcription,
+                        "speaker": None,
+                    }
+                ]
+            )
+            update_task(
+                task_id,
+                status="processing",
+                progress=70,
+                transcription=transcription,
+                language=language,
+                duration_seconds=duration,
+                segments=segments_payload,
+            )
 
-            producer.send(
+            future = producer.send(
                 TRANSCRIPTION_TOPIC,
                 {
                     "task_id": task_id,
@@ -211,6 +257,8 @@ def main():
                     "language": language,
                 },
             )
+            future.get(timeout=10)
+            producer.flush()
             update_task(task_id, status="processing", progress=85)
             logger.info("Task %s sent to transcription-topic", task_id)
         except Exception as e:
@@ -221,4 +269,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

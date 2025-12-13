@@ -4,7 +4,6 @@
 """
 import base64
 import logging
-import os
 import time
 from typing import Any, Dict, List, Optional
 
@@ -62,7 +61,7 @@ class ZoomClient:
         token = await self._get_access_token()
         client = await self._get_client()
 
-        params = {
+        base_params = {
             "from": None,
             "page_size": 100,
         }
@@ -73,35 +72,47 @@ class ZoomClient:
             from_date = (dt.datetime.utcnow() - dt.timedelta(days=settings.zoom_recording_days_back)).strftime(
                 "%Y-%m-%d"
             )
-            params["from"] = from_date
-
-        resp = await client.get(
-            f"/v2/users/{settings.zoom_user_id}/recordings",
-            headers={"Authorization": f"Bearer {token}"},
-            params={k: v for k, v in params.items() if v is not None},
-        )
-        resp.raise_for_status()
-        data = resp.json()
+            base_params["from"] = from_date
 
         recordings: List[Dict[str, Any]] = []
-        for meeting in data.get("meetings", []):
-            topic = meeting.get("topic") or "Zoom Meeting"
-            duration_minutes = meeting.get("duration") or 0
-            for f in meeting.get("recording_files", []):
-                download_url = f.get("download_url")
-                if not download_url:
-                    continue
-                rec = {
-                    "id": f.get("id") or f.get("file_path") or download_url,
-                    "meeting_id": meeting.get("id") or meeting.get("uuid"),
-                    "topic": topic,
-                    "duration_seconds": (duration_minutes or 0) * 60,
-                    "download_url": download_url,
-                    "file_extension": f.get("file_extension"),
-                    "recording_start": f.get("recording_start"),
-                    "recording_type": f.get("recording_type"),
-                }
-                recordings.append(rec)
+        next_page = None
+
+        while True:
+            params = {k: v for k, v in base_params.items() if v is not None}
+            if next_page:
+                params["next_page_token"] = next_page
+
+            resp = await client.get(
+                f"/v2/users/{settings.zoom_user_id}/recordings",
+                headers={"Authorization": f"Bearer {token}"},
+                params=params,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            for meeting in data.get("meetings", []):
+                topic = meeting.get("topic") or "Zoom Meeting"
+                duration_minutes = meeting.get("duration") or 0
+                for f in meeting.get("recording_files", []):
+                    download_url = f.get("download_url")
+                    if not download_url:
+                        continue
+                    rec = {
+                        "id": f.get("id") or f.get("file_path") or download_url,
+                        "meeting_id": meeting.get("id") or meeting.get("uuid"),
+                        "topic": topic,
+                        "duration_seconds": (duration_minutes or 0) * 60,
+                        "download_url": download_url,
+                        "file_extension": f.get("file_extension"),
+                        "recording_start": f.get("recording_start"),
+                        "recording_type": f.get("recording_type"),
+                    }
+                    recordings.append(rec)
+
+            next_page = data.get("next_page_token")
+            if not next_page:
+                break
+
         return recordings
 
     async def download_recording(self, download_url: str, destination_path: str) -> bool:
@@ -134,4 +145,3 @@ def get_zoom_client() -> ZoomClient:
     if _zoom_client is None:
         _zoom_client = ZoomClient()
     return _zoom_client
-

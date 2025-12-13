@@ -9,6 +9,12 @@ import psycopg2
 import requests
 from kafka import KafkaConsumer
 
+try:
+    from api.metrics import inc_task_status
+except Exception:
+    def inc_task_status(_: str) -> None:  # fallback no-op
+        return None
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("llm-worker")
 
@@ -52,6 +58,7 @@ def update_task(task_id: str, status: str = None, progress: int = None, summary:
                 if status:
                     fields.append("status = %(status)s")
                     params["status"] = status
+                    inc_task_status(status)
                 if progress is not None:
                     fields.append("progress = %(progress)s")
                     params["progress"] = progress
@@ -76,7 +83,7 @@ def update_task(task_id: str, status: str = None, progress: int = None, summary:
 
 def call_ollama(transcription: str):
     url = LLM_API_BASE_URL.rstrip("/") + "/api/chat"
-    safe_transcription = transcription[:4000] if transcription else ""
+    safe_transcription = transcription[:15000] if transcription else ""
     try:
         user_content = PROMPT.format(transcription=safe_transcription)
     except KeyError:
@@ -154,4 +161,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

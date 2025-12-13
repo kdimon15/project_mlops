@@ -25,6 +25,10 @@ model_id = os.getenv("LLM_MODEL_ID", "gemma3:1b-it")
 revision = os.getenv("LLM_MODEL_REVISION", "main")
 token = os.getenv("HF_TOKEN", "")
 
+if ":" in model_id:
+    print("Skipping HF preload for Ollama-style model id:", model_id)
+    raise SystemExit(0)
+
 if not token:
     raise SystemExit("HF_TOKEN обязателен для загрузки модели gemma3:1b (доступ ограничен)")
 
