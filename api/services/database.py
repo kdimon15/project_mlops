@@ -103,6 +103,15 @@ class DatabaseService:
     def get_task(self, task_id: str) -> Optional[TaskModel]:
         """Получить задачу по ID."""
         return self.db.query(TaskModel).filter(TaskModel.id == task_id).first()
+
+    def get_task_by_recording(self, recording_id: str) -> Optional[TaskModel]:
+        """Получить задачу по recording_id (для защиты от дублей)."""
+        return (
+            self.db.query(TaskModel)
+            .filter(TaskModel.recording_id == recording_id)
+            .order_by(TaskModel.created_at.desc())
+            .first()
+        )
     
     def update_task_status(
         self,
@@ -163,6 +172,13 @@ class DatabaseService:
             self.db.commit()
             self.db.refresh(task)
         return task
+
+    def delete_task(self, task_id: str) -> None:
+        """Удалить задачу по ID."""
+        task = self.get_task(task_id)
+        if task:
+            self.db.delete(task)
+            self.db.commit()
     
     def list_tasks(
         self,

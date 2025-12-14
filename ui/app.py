@@ -15,33 +15,6 @@ def client() -> httpx.Client:
     return httpx.Client(base_url=API_BASE_URL, timeout=20.0)
 
 
-def copy_button(label: str, text: str) -> None:
-    escaped = json.dumps(text)
-    btn = f"""
-    <button class="copy-btn" onclick='navigator.clipboard.writeText({escaped});'>
-      📋 {label}
-    </button>
-    """
-    st.markdown(btn, unsafe_allow_html=True)
-
-
-def render_block(title: str, text: str, key_prefix: str) -> None:
-    st.subheader(title)
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        copy_button("Копировать", text)
-        st.download_button(
-            "⬇️ Скачать .txt",
-            data=text,
-            file_name=f"{key_prefix}.txt",
-            mime="text/plain",
-            key=f"dl-{key_prefix}",
-        )
-    with col2:
-        st.caption("Можно копировать или скачать как txt.")
-    st.text_area("", text, height=260, key=f"ta-{key_prefix}")
-
-
 def hero() -> None:
     st.markdown(
         """
@@ -252,8 +225,49 @@ def layout_creator() -> Optional[str]:
     return task_id
 
 
+def parse_summary_block(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Нормализуем summary/key_points/action_items, убираем сырые JSON-блоки."""
+    summary_raw = data.get("summary") or ""
+    key_points = data.get("key_points") or []
+    action_items = data.get("action_items") or []
+
+    cleaned = summary_raw.strip()
+    # Убираем ограждающие ```json ... ```
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`").strip()
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:].strip()
+    summary_val = summary_raw
+    try:
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, dict):
+            summary_val = parsed.get("summary") or summary_val
+            key_points = parsed.get("key_points") or key_points
+            action_items = parsed.get("action_items") or action_items
+    except Exception:
+        pass
+
+    def _clean_list(values: List[Any]) -> List[str]:
+        result: List[str] = []
+        for v in values:
+            if v is None:
+                continue
+            s = str(v).strip().strip('"').strip()
+            if s:
+                result.append(s)
+        return result
+
+    return {
+        "summary": (summary_val or "").strip(),
+        "key_points": _clean_list(key_points),
+        "action_items": _clean_list(action_items),
+    }
+
+
 def layout_results(task_id: Optional[str]) -> None:
     st.markdown("### Результаты")
+    if "result_cache" not in st.session_state:
+        st.session_state["result_cache"] = {}
     if not task_id:
         st.info("Создайте задачу через встречу или загрузку файла.")
         return
@@ -276,48 +290,83 @@ def layout_results(task_id: Optional[str]) -> None:
     )
 
     if st_status in ("queued", "processing"):
-        st.info("Задача в обработке. Страница обновится автоматически.")
-        # Автообновление страницы каждые 5 секунд, пока задача не завершена
-        st.markdown(
-            "<meta http-equiv='refresh' content='5'>",
-            unsafe_allow_html=True,
-        )
+        st.info("Задача в обработке. Обновите статус вручную при ожидании.")
+        if st.button("🔄 Обновить статус", key=f"refresh-{task_id}"):
+            st.rerun()
         return
 
     if st_status == "failed":
         st.error("Извините, сервис пока не работает (ошибка обработки).")
         return
 
-    with st.spinner("Получаю результат..."):
-        data = load_result(task_id)
+    data = st.session_state["result_cache"].get(task_id)
+    if not data:
+        with st.spinner("Получаю результат..."):
+            data = load_result(task_id)
+        if data:
+            st.session_state["result_cache"][task_id] = data
 
     if not data:
         return
 
+    parsed = parse_summary_block(data)
+    summary_val = parsed["summary"]
+    key_points = parsed["key_points"]
+    action_items = parsed["action_items"]
+
     tabs = st.tabs(["Транскрипция", "Саммари", "TODO / Action items"])
     with tabs[0]:
-        render_block(
-            "Полный текст транскрипции",
-            data.get("transcription", ""),
-            f"{task_id}-transcript",
+        transcript = data.get("transcription", "") or ""
+        st.subheader("Полный текст транскрипции")
+        st.download_button(
+            "⬇️ Скачать .txt",
+            data=transcript,
+            file_name=f"{task_id}-transcript.txt",
+            mime="text/plain",
+            key=f"dl-transcript-{task_id}",
         )
+        st.text_area("", transcript, height=260, key=f"ta-{task_id}-transcript")
     with tabs[1]:
-        render_block("Саммари", data.get("summary", ""), f"{task_id}-summary")
+        summary_md = f"**Summary:** {summary_val}"
+        if key_points:
+            bullets = "\n".join(f"- {kp}" for kp in key_points)
+            summary_md += f"\n\n**Ключевые пункты:**\n{bullets}"
+        st.markdown(summary_md)
+        summary_text = f"Summary: {summary_val}"
+        if key_points:
+            summary_text += "\n\nКлючевые пункты:\n" + "\n".join(f"- {kp}" for kp in key_points)
+        st.download_button(
+            "⬇️ Скачать .txt",
+            data=summary_text,
+            file_name=f"{task_id}-summary.txt",
+            mime="text/plain",
+            key=f"dl-summary-{task_id}",
+        )
     with tabs[2]:
-        items = data.get("action_items") or []
+        items = action_items or []
         todo_text = (
             "\n".join(f"- [ ] {item}" for item in items)
             if items
             else "Нет action items"
         )
-        render_block("TODO / Action items", todo_text, f"{task_id}-todo")
+        st.subheader("TODO / Action items")
+        st.download_button(
+            "⬇️ Скачать .txt",
+            data=todo_text,
+            file_name=f"{task_id}-todo.txt",
+            mime="text/plain",
+            key=f"dl-todo-{task_id}",
+        )
+        st.text_area("", todo_text, height=220, key=f"ta-{task_id}-todo")
 
 
 def main() -> None:
     st.set_page_config(page_title="CallScribe UI", layout="wide")
     hero()
+    if "last_task_id" not in st.session_state:
+        st.session_state["last_task_id"] = None
 
-    swagger_url = f"{API_BASE_URL.replace('http://api:8000', 'http://localhost:8000').rstrip('/')}/docs"
+    swagger_url = f"{API_BASE_URL.rstrip('/')}/docs"
     st.markdown(
         f"""
         <div style="padding:8px 12px; background:#0f172a; border-radius:10px; display:inline-block;">

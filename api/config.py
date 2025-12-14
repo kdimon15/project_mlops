@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     llm_api_base_url: str = "http://ollama:11434/v1"
     llm_api_key: str = "ollama"  # Ollama не требует реального ключа
     llm_model: str = "gemma:2b"
+    llm_model_id: str = "gemma3:1b-it"
+    llm_model_revision: str = "main"
+    llm_timeout: int = 120
+
+    # Hugging Face
+    hf_token: str = ""
     
     # Kontur Talk Integration
     kontur_talk_api_url: str = ""
@@ -46,6 +52,12 @@ class Settings(BaseSettings):
     allowed_audio_extensions: list[str] = [".mp3", ".wav", ".ogg", ".m4a"]
     allowed_video_extensions: list[str] = [".mp4", ".mkv", ".webm"]
     upload_dir: str = "/tmp/uploads"
+    api_base_url: str = "http://localhost:8000"
+
+    # ASR worker
+    asr_model_id: str = "ai-sage/GigaAM-v3"
+    asr_model_revision: str = "e2e_rnnt"
+    asr_segment_seconds: int = 24
     
     # Prometheus
     metrics_enabled: bool = True

@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import logging
 import os
+from urllib.parse import urlparse
+from starlette.concurrency import run_in_threadpool
 
 from api.models.schemas import (
     ZoomRecordingsResponse,
@@ -19,6 +21,8 @@ from api.services.database import get_db, DatabaseService
 from api.services.kafka_producer import get_kafka_producer
 from api.services.zoom_client import get_zoom_client
 from api.config import get_settings
+from api.metrics import inc_task_created, inc_kafka_enqueue
+from api.utils.file_utils import delete_file
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -57,8 +61,24 @@ async def process_zoom_recording(
     request: ZoomProcessRequest,
     db: Session = Depends(get_db),
 ):
+    parsed = urlparse(request.download_url or "")
+    if parsed.scheme not in {"https"} or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Invalid download_url")
+    if not parsed.netloc.endswith("zoom.us"):
+        raise HTTPException(status_code=400, detail="download_url must point to zoom.us")
+
     if not request.download_url:
         raise HTTPException(status_code=400, detail="download_url is required")
+
+    # Не создаем дубликаты
+    db_service = DatabaseService(db)
+    existing = db_service.get_task_by_recording(recording_id)
+    if existing:
+        return TaskCreateResponse(
+            task_id=existing.id,
+            status=existing.status,
+            created_at=existing.created_at,
+        )
 
     # Создаем задачу
     db_service = DatabaseService(db)
@@ -68,6 +88,7 @@ async def process_zoom_recording(
         recording_id=recording_id,
         language="auto",
     )
+    inc_task_created(TaskSource.ZOOM.value)
 
     # Скачиваем файл
     upload_dir = settings.upload_dir
@@ -78,6 +99,7 @@ async def process_zoom_recording(
     file_path = os.path.join(upload_dir, f"{task.id}{ext}")
 
     zoom_client = get_zoom_client()
+    success = False
     download_ok = await zoom_client.download_recording(request.download_url, file_path)
     if not download_ok:
         db_service.update_task_status(
@@ -94,17 +116,20 @@ async def process_zoom_recording(
 
     # Отправляем в Kafka
     kafka_producer = get_kafka_producer()
-    success = kafka_producer.send_audio_task(
-        task_id=task.id,
-        file_path=file_path,
-        language="auto",
+    success = await run_in_threadpool(
+        kafka_producer.send_audio_task,
+        task.id,
+        file_path,
+        "auto",
     )
+    inc_kafka_enqueue("audio-topic", success)
     if not success:
         db_service.update_task_status(
             task.id,
             TaskStatus.FAILED,
             error_message="Failed to queue task",
         )
+        delete_file(file_path)
         raise HTTPException(status_code=500, detail="Failed to queue task")
 
     return TaskCreateResponse(

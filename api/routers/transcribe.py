@@ -4,6 +4,7 @@
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
 from sqlalchemy.orm import Session
 import logging
+from starlette.concurrency import run_in_threadpool
 
 from api.models.schemas import (
     TaskCreateResponse, 
@@ -14,7 +15,7 @@ from api.models.schemas import (
 )
 from api.services.database import get_db, DatabaseService
 from api.services.kafka_producer import get_kafka_producer
-from api.utils.file_utils import save_upload_file
+from api.utils.file_utils import save_upload_file, delete_file
 from api.config import get_settings
 from api.metrics import inc_task_created, inc_kafka_enqueue
 
@@ -52,6 +53,8 @@ async def transcribe_file(
     # Создаем сервис БД
     db_service = DatabaseService(db)
     
+    task = None
+    file_path = ""
     try:
         # Создаем задачу в БД
         task = db_service.create_task(
@@ -68,12 +71,13 @@ async def transcribe_file(
         task.file_path = file_path
         db.commit()
         
-        # Отправляем задачу в Kafka
+        # Отправляем задачу в Kafka (блокирующий клиент уводим в threadpool)
         kafka_producer = get_kafka_producer()
-        success = kafka_producer.send_audio_task(
-            task_id=task.id,
-            file_path=file_path,
-            language=language.value
+        success = await run_in_threadpool(
+            kafka_producer.send_audio_task,
+            task.id,
+            file_path,
+            language.value
         )
         inc_kafka_enqueue("audio-topic", success)
         
@@ -95,7 +99,16 @@ async def transcribe_file(
         )
         
     except HTTPException:
+        # Чистим артефакты при ошибке валидации/публикации
+        if task:
+            if file_path:
+                delete_file(file_path)
+            db_service.delete_task(task.id)
         raise
     except Exception as e:
+        if task:
+            if file_path:
+                delete_file(file_path)
+            db_service.delete_task(task.id)
         logger.exception(f"Error processing file: {e}")
         raise HTTPException(status_code=500, detail=str(e))

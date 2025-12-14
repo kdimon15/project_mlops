@@ -2,7 +2,7 @@ import os
 import pathlib
 
 # Устанавливаем SQLite БД до импорта приложения
-os.environ.setdefault("DATABASE_URL", "sqlite:////tmp/test.db")
+os.environ["DATABASE_URL"] = "sqlite:////tmp/test.db"
 
 from api.main import app  # noqa: E402
 from api.services.database import Base, engine  # noqa: E402
@@ -31,4 +31,3 @@ def test_tasks_empty():
     data = resp.json()
     assert "tasks" in data
     assert data["tasks"] == []
-

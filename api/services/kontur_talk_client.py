@@ -127,6 +127,10 @@ class KonturTalkClient:
                         meeting_id=entity.get("roomName", "")  # Алиас
                     )
                     all_recordings.append(recording)
+                    if len(all_recordings) >= limit:
+                        break
+                if len(all_recordings) >= limit:
+                    break
                 
                 page_token = data.get("nextPageToken")
                 if not page_token:

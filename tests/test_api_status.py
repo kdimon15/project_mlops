@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 # Настраиваем SQLite до импорта приложения
-os.environ.setdefault("DATABASE_URL", "sqlite:////tmp/test.db")
+os.environ["DATABASE_URL"] = "sqlite:////tmp/test.db"
 
 from api.main import app  # noqa: E402
 from api.services.database import Base, engine  # noqa: E402
@@ -33,4 +33,3 @@ def test_results_not_found():
 def test_task_status_not_found():
     resp = client.get("/api/v1/tasks/non-existent-id")
     assert resp.status_code == 404
-

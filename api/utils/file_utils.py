@@ -1,12 +1,9 @@
 """
 Утилиты для работы с файлами.
 """
-import os
-import uuid
 import magic
 import logging
 from pathlib import Path
-from typing import Optional
 from fastapi import UploadFile, HTTPException
 
 from api.config import get_settings
@@ -160,15 +157,3 @@ def delete_file(file_path: str) -> bool:
     except Exception as e:
         logger.error(f"Failed to delete file {file_path}: {e}")
         return False
-
-
-def is_video_file(file_path: str) -> bool:
-    """Проверить, является ли файл видео."""
-    mime = magic.Magic(mime=True)
-    mime_type = mime.from_file(file_path)
-    return mime_type in VIDEO_MIME_TYPES
-
-
-def get_file_extension(file_path: str) -> str:
-    """Получить расширение файла."""
-    return Path(file_path).suffix.lower()
