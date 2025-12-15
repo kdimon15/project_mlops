@@ -72,6 +72,12 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     volumes:
       - uploads:/tmp/uploads
     ports:
@@ -124,6 +130,10 @@ services:
       - "8501:8501"
     depends_on:
       api:
+        condition: service_healthy
+      asr-worker:
+        condition: service_started
+      llm-worker:
         condition: service_started
 
   asr-worker:
