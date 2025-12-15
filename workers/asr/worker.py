@@ -169,7 +169,7 @@ def main():
         group_id="asr-worker",
         bootstrap_servers=KAFKA_SERVERS.split(","),
         value_deserializer=lambda v: json.loads(v.decode("utf-8")),
-        auto_offset_reset="latest",
+        auto_offset_reset="earliest",
         enable_auto_commit=True,
     )
     producer = KafkaProducer(
