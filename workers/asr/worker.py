@@ -1,11 +1,8 @@
 import json
 import logging
+import math
 import os
-import shutil
-import subprocess
 import time
-import tempfile
-from glob import glob
 from datetime import datetime
 from urllib.parse import urlparse
 
@@ -26,7 +23,7 @@ logger = logging.getLogger("asr-worker")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/callscribe")
 KAFKA_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
-AUDIO_TOPIC = os.getenv("KAFKA_AUDIO_TOPIC", "audio-topic")
+DIARIZATION_TOPIC = os.getenv("KAFKA_DIARIZATION_TOPIC") or os.getenv("KAFKA_AUDIO_TOPIC", "audio-topic")
 TRANSCRIPTION_TOPIC = os.getenv("KAFKA_TRANSCRIPTION_TOPIC", "transcription-topic")
 HF_TOKEN = os.getenv("HF_TOKEN")
 ASR_MODEL_ID = os.getenv("ASR_MODEL_ID", "ai-sage/GigaAM-v3")
@@ -35,7 +32,8 @@ ASR_MODEL_REVISION = os.getenv("ASR_MODEL_REVISION", "e2e_rnnt")
 # GigaAM-v3 написан с кастомным .transcribe через trust_remote_code
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DTYPE = torch.float16 if torch.cuda.is_available() else torch.float32
-SEGMENT_SECONDS = int(os.getenv("ASR_SEGMENT_SECONDS", "24"))
+
+pending_transcriptions: dict[str, dict] = {}
 
 
 def db_connect():
@@ -57,6 +55,7 @@ def update_task(
     language: str = None,
     duration_seconds: float = None,
     segments: str = None,
+    error_message: str = None,
 ):
     conn = db_connect()
     try:
@@ -83,6 +82,9 @@ def update_task(
                 if segments is not None:
                     fields.append("transcription_segments = %(segments)s")
                     params["segments"] = segments
+                if error_message:
+                    fields.append("error_message = %(error_message)s")
+                    params["error_message"] = error_message
                 if status in {"completed", "failed"}:
                     fields.append("completed_at = %(updated_at)s")
                 if fields:
@@ -109,63 +111,73 @@ def load_asr_pipeline():
         ASR_MODEL_ID,
         revision=ASR_MODEL_REVISION,
         trust_remote_code=True,
-        torch_dtype=DTYPE,
+        dtype=DTYPE,
         device_map="auto" if torch.cuda.is_available() else None,
     )
     model.to(DEVICE)
     return model
 
 
-def get_duration(path: str) -> float:
-    try:
-        out = subprocess.check_output(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                path,
-            ]
+def finalize_transcription(task_id: str, producer: KafkaProducer):
+    entry = pending_transcriptions.pop(task_id, None)
+    if not entry or not entry["segments"]:
+        return
+
+    segments_data = sorted(entry["segments"].values(), key=lambda seg: seg["start_time"])
+    final_lines = []
+    segments_payload = []
+    max_end = 0.0
+
+    for segment in segments_data:
+        speaker_label = segment.get("speaker_label") or "Спикер 1"
+        text = segment.get("text", "").strip()
+        final_lines.append(f"{speaker_label}: {text}")
+        start = segment.get("start_time", 0.0)
+        end = segment.get("end_time", start)
+        segments_payload.append(
+            {
+                "start": start,
+                "end": end,
+                "text": text,
+                "speaker": speaker_label,
+            }
         )
-        return float(out.strip())
-    except Exception:
-        return 0.0
+        max_end = max(max_end, end)
 
+    transcription_text = "\n".join(line for line in final_lines if line.strip())
+    segments_json = json.dumps(segments_payload, ensure_ascii=False)
+    duration_seconds = math.ceil(max_end) if segments_payload else 0
 
-def split_audio(path: str, segment_seconds: int) -> tuple[list[str], str]:
-    tmp_dir = tempfile.mkdtemp(prefix="asr_segments_")
-    out_tpl = os.path.join(tmp_dir, "seg_%03d.wav")
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i",
-        path,
-        "-ac",
-        "1",
-        "-ar",
-        "16000",
-        "-f",
-        "segment",
-        "-segment_time",
-        str(segment_seconds),
-        "-c:a",
-        "pcm_s16le",
-        out_tpl,
-    ]
-    subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    segments = sorted(glob(os.path.join(tmp_dir, "seg_*.wav")))
-    return segments, tmp_dir
+    update_task(
+        task_id,
+        status="processing",
+        progress=70,
+        transcription=transcription_text,
+        segments=segments_json,
+        duration_seconds=duration_seconds,
+        language=entry.get("language", "auto"),
+    )
+
+    future = producer.send(
+        TRANSCRIPTION_TOPIC,
+        {
+            "task_id": task_id,
+            "transcription": transcription_text,
+            "language": entry.get("language", "auto"),
+        },
+    )
+    future.get(timeout=10)
+    producer.flush()
+    update_task(task_id, status="processing", progress=85)
+    logger.info("Task %s sent to transcription-topic", task_id)
 
 
 def main():
     asr_model = load_asr_pipeline()
 
-    logger.info("Starting ASR worker. Subscribing to %s", AUDIO_TOPIC)
+    logger.info("Starting ASR worker. Subscribing to %s", DIARIZATION_TOPIC)
     consumer = KafkaConsumer(
-        AUDIO_TOPIC,
+        DIARIZATION_TOPIC,
         group_id="asr-worker",
         bootstrap_servers=KAFKA_SERVERS.split(","),
         value_deserializer=lambda v: json.loads(v.decode("utf-8")),
@@ -180,98 +192,83 @@ def main():
     for msg in consumer:
         payload = msg.value
         task_id = payload.get("task_id")
-        file_path = payload.get("file_path")
+        segment_path = payload.get("file_path")
         language = payload.get("language", "auto")
-        logger.info("Received audio task %s (lang=%s, file=%s)", task_id, language, file_path)
+        speaker_label = payload.get("speaker_label")
+        start_time = float(payload.get("start_time", 0.0))
+        end_time = float(payload.get("end_time", start_time))
+        total_segments = int(payload.get("total_segments") or 0)
+        segment_index = payload.get("segment_index")
+        try:
+            if segment_index is not None:
+                segment_index = int(segment_index)
+            else:
+                segment_index = len(pending_transcriptions.get(task_id, {}).get("segments", {}))
+        except (TypeError, ValueError):
+            segment_index = len(pending_transcriptions.get(task_id, {}).get("segments", {}))
 
-        if not task_id or not file_path or not os.path.exists(file_path):
-            logger.error("Invalid payload: %s", payload)
+        logger.info("Received diarized segment %s for task %s", segment_index, task_id)
+
+        if not task_id or not segment_path or not os.path.exists(segment_path):
+            logger.error("Invalid segment payload: %s", payload)
             if task_id:
                 update_task(task_id, status="failed", progress=0)
             continue
 
-        try:
-            duration = get_duration(file_path)
-            update_task(
-                task_id,
-                status="processing",
-                progress=25,
-                language=language,
-                duration_seconds=duration,
-            )
+        if task_id not in pending_transcriptions:
+            update_task(task_id, status="processing", progress=25, language=language)
 
-            transcribe_kwargs = {}
+        entry = pending_transcriptions.setdefault(
+                task_id,
+            {
+                "segments": {},
+                "processed": 0,
+                "total": total_segments or 1,
+                "language": language,
+            },
+        )
+        entry["total"] = max(entry.get("total", 1), total_segments or 1)
+        if language and language != "auto":
+            entry["language"] = language
+
+        def transcribe_one(path: str) -> str:
+            kwargs = {}
             if language and language != "auto":
-                transcribe_kwargs["language"] = language
+                kwargs["language"] = language
+            text = asr_model.transcribe(path, **kwargs)
+            if isinstance(text, dict) and "text" in text:
+                text = text["text"]
+            return (text or "").strip()
 
-            def transcribe_one(path: str) -> str:
-                text = asr_model.transcribe(path, **transcribe_kwargs)
-                if isinstance(text, dict) and "text" in text:
-                    text = text["text"]
-                return text or ""
-
-            if duration > SEGMENT_SECONDS:
-                logger.info(
-                    "Splitting long audio (%.1fs) for task %s into %ds chunks",
-                    duration,
-                    task_id,
-                    SEGMENT_SECONDS,
-                )
-                segments, tmp_dir = split_audio(file_path, SEGMENT_SECONDS)
-                parts = []
-                try:
-                    for idx, seg in enumerate(segments, start=1):
-                        part_text = transcribe_one(seg)
-                        logger.info("Task %s chunk %d/%d done", task_id, idx, len(segments))
-                        parts.append(part_text)
-                    transcription = "\n".join(parts).strip()
-                finally:
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
+        try:
+            transcription_text = transcribe_one(segment_path)
+            if segment_index in entry["segments"]:
+                logger.warning("Segment %s already processed for task %s", segment_index, task_id)
             else:
-                transcription = transcribe_one(file_path)
+                entry["processed"] += 1
+            entry["segments"][segment_index] = {
+                "start_time": start_time,
+                "end_time": end_time,
+                "speaker_label": speaker_label or "Спикер 1",
+                "text": transcription_text,
+            }
 
-            segments_payload = json.dumps(
-                [
-                    {
-                        "start": 0.0,
-                        "end": duration or 0.0,
-                        "text": transcription,
-                        "speaker": None,
-                    }
-                ]
-            )
-            update_task(
-                task_id,
-                status="processing",
-                progress=70,
-                transcription=transcription,
-                language=language,
-                duration_seconds=duration,
-                segments=segments_payload,
+            logger.info(
+                "Task %s segment %s/%s transcribed", task_id, entry["processed"], entry["total"]
             )
 
-            future = producer.send(
-                TRANSCRIPTION_TOPIC,
-                {
-                    "task_id": task_id,
-                    "transcription": transcription,
-                    "language": language,
-                },
-            )
-            future.get(timeout=10)
-            producer.flush()
-            update_task(task_id, status="processing", progress=85)
-            logger.info("Task %s sent to transcription-topic", task_id)
-        except Exception as e:
-            logger.exception("Failed to process task %s: %s", task_id, e)
-            update_task(task_id, status="failed")
+            if entry["total"] and entry["processed"] >= entry["total"]:
+                finalize_transcription(task_id, producer)
+
+        except Exception as exc:
+            logger.exception("Failed to transcribe segment for task %s", task_id)
+            update_task(task_id, status="failed", error_message=str(exc))
+            pending_transcriptions.pop(task_id, None)
         finally:
-            if file_path and os.path.exists(file_path):
-                try:
-                    os.remove(file_path)
-                    logger.info("Deleted processed file %s", file_path)
-                except Exception as exc:
-                    logger.warning("Failed to delete file %s: %s", file_path, exc)
+            try:
+                os.remove(segment_path)
+            except OSError:
+                logger.warning("Failed to delete segment file %s", segment_path)
         time.sleep(0.1)
 
 

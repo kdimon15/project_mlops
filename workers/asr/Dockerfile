@@ -41,6 +41,7 @@ COPY workers/asr/worker.py /app/worker.py
 
 ENV KAFKA_BOOTSTRAP_SERVERS=kafka:9092
 ENV KAFKA_AUDIO_TOPIC=audio-topic
+ENV KAFKA_DIARIZATION_TOPIC=diarization-topic
 ENV KAFKA_TRANSCRIPTION_TOPIC=transcription-topic
 ENV DATABASE_URL=postgresql://postgres:postgres@postgres:5432/callscribe
 

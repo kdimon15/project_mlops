@@ -1,8 +1,5 @@
 """
 CallScribe API - Главный модуль приложения.
-
-Сервис транскрибации и суммаризации звонков.
-Использует Whisper для ASR и Gemma 1.5B (Ollama) для суммаризации.
 """
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,7 +21,6 @@ from api.models.schemas import HealthResponse, ErrorResponse
 from api.services.database import init_db
 from api.routers import transcribe, tasks, results, kontur_talk, zoom
 
-# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format='{"time": "%(asctime)s", "level": "%(levelname)s", "logger": "%(name)s", "message": "%(message)s"}',
@@ -152,7 +148,6 @@ app.mount("/metrics", metrics_app)
     description="Проверка работоспособности сервиса."
 )
 async def health_check():
-    """Проверка здоровья сервиса."""
     return HealthResponse(
         status="healthy",
         version=settings.app_version
@@ -166,7 +161,6 @@ async def health_check():
     description="Корневой endpoint с информацией о сервисе."
 )
 async def root():
-    """Корневой endpoint."""
     return {
         "service": settings.app_name,
         "version": settings.app_version,

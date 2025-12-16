@@ -43,6 +43,13 @@
 - Распознавание речи на русском и английском языках
 - Транскрипция с временными метками
 - Точность (WER) ≤ 15% на чистых записях
+- В выводе явно указывать сегменты, пронумерованные как `Спикер 1`, `Спикер 2` и т.д., чтобы сохранить связь между голосом и текстом.
+
+### Диаризация
+- Обнаружение смены голоса, объединение кусочков одного участника и привязка к обозначениям «Спикер N»
+- Использование `pydub` для нормализации аудио, разбиения на фреймы и подсчета длительности сегментов перед передачей в модель ASR
+- Отдельный `diarization worker` берет аудиофайл из Kafka, выполняет сегментацию через `pydub`, затем публикует сегменты с метками спикеров в очередь ASR
+- Поддержка фоновых шумов и перекрывающихся голосов через короткие перекрывающиеся окна при нарезке, оценка громкости и частоты для стабильного распознавания
 
 ### Суммаризация (LLM)
 - Генерация краткого саммари (до 500 слов)
@@ -124,20 +131,20 @@
 │  │              │          │                                                    │
 │  └──────────────┘          │                                                    │
 │                            ▼                                                    │
-│  ┌──────────┐     ┌──────────────┐     ┌─────────────────────────────────┐      │
-│  │          │     │              │     │           Kafka                 │      │
-│  │ Streamlit│────▶│   FastAPI    │────▶│  ┌─────────┐  ┌─────────────┐   │      │
-│  │    UI    │     │   Gateway    │     │  │ audio   │  │transcription│   │      │
-│  │          │◀────│              │◀────│  │ -topic  │  │   -topic    │   │      │
-│  └──────────┘     └──────────────┘     │  └─────────┘  └─────────────┘   │      │
-│       │                  │             └──────┬──────────────┬───────────┘      │
-│       │                  │                    │              │                  │
-│       │ upload           ▼                    ▼              ▼                  │
-│       │           ┌──────────────┐     ┌──────────┐   ┌──────────┐              │
-│       │           │              │     │  ASR     │   │   LLM    │              │
-│       └──────────▶│  PostgreSQL  │◀────│  Worker  │   │  Worker  │              │
-│                   │              │     │ (GigaAM)│    │ (Gemma)  │              │
-│                   └──────────────┘     └──────────┘   └──────────┘              │
+│  ┌──────────┐     ┌──────────────┐     ┌───────────────────────────────────────┐│
+│  │          │     │              │     │                Kafka                  ││
+│  │ Streamlit│────▶│   FastAPI    │────▶│ ┌─────────┐  ┌─────────┐  ┌─────────┐ ││
+│  │    UI    │     │   Gateway    │     │ │ audio   │  │diarizat.│  │transcrip│ ││
+│  │          │◀────│              │◀────│ │ -topic  │  │ -topic  │  │ -topic  │ ││
+│  └──────────┘     └──────────────┘     │ └─────────┘  └─────────┘  └─────────┘ ││
+│       │                  │             └─────┬──────────┬──────────┬───────────┘│
+│       │                  │                   │          │          │            │
+│       │ upload           ▼                   ▼          ▼          ▼            │
+│       │           ┌──────────────┐     ┌──────────┐ ┌──────────┐   ┌──────────┐ │
+│       │           │              │     │Diarizat. │ │   ASR    │   │   LLM    │ │
+│       └──────────▶│  PostgreSQL  │◀────│  Worker  │ │  Worker  │   │  Worker  │ │
+│                   │              │     │ (Pyannote)││ (GigaAM) │   │ (Gemma)  │ │
+│                   └──────────────┘     └──────────┘ └──────────┘   └──────────┘ │
 │                          │                                 │                    │
 │                          │                                 ▼                    │
 │                          │                          ┌──────────┐                │
@@ -169,6 +176,7 @@
 | **Kontur Talk Client** | Python | Интеграция с API Kontur Talk |
 | **Message Broker** | Kafka | Асинхронная очередь задач |
 | **ASR Worker** | GigaAM | Транскрибация аудио в текст |
+| **Diarization Worker** | Python + pydub | Сегментация по спикерам, упорядочивание потоков перед ASR |
 | **LLM Worker** | Gemma 1.5B (Ollama) | Суммаризация и извлечение тезисов |
 | **Database** | PostgreSQL | Хранение данных |
 | **Monitoring** | Prometheus + Grafana | Метрики и визуализация |
@@ -289,18 +297,13 @@ project_mlops/
 ```env
 KONTUR_TALK_API_URL=https://api.kontur.ru/talk/v1
 KONTUR_TALK_API_KEY=your_api_key
-KONTUR_TALK_WEBHOOK_SECRET=your_webhook_secret
 ```
 
-3. Настройте webhook в Kontur Talk:
-   - URL: `https://your-domain.com/api/v1/kontur-talk/webhook`
-   - События: `recording.completed`
 
 ### Режимы работы
 
 | Режим | Описание |
 |-------|----------|
-| **Webhook** | Kontur Talk отправляет уведомление о новой записи |
 | **Polling** | Периодический опрос API для получения новых записей |
 | **Manual** | Ручной запрос записи по ID через UI |
 
@@ -313,20 +316,24 @@ KONTUR_TALK_WEBHOOK_SECRET=your_webhook_secret
 git clone https://github.com/kdimon15/project_mlops.git
 cd project_mlops
 
-# Копирование конфигурации
 cp .env.example .env
-# Отредактируйте .env, добавив KONTUR_TALK_API_KEY
-
-# Запуск Ollama и загрузка модели Gemma
-docker run -d --name ollama -p 11434:11434 ollama/ollama
-docker exec ollama ollama pull gemma:2b
+# Отредактируйте .env, добавив KONTUR_TALK_API_KEY, HF_TOKEN
 
 # Запуск всех сервисов
-docker-compose up -d
+docker compose up -d
 
 # Проверка статуса
-docker-compose ps
+docker compose ps
 ```
+
+**Важно:** Перед запуском необходимо принять соглашения на Hugging Face для следующих репозиториев:
+
+- [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
+- [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
+- [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1)
+
+После этого добавьте `HF_TOKEN` в `.env` файл.
+
 
 ### Доступ к сервисам
 
@@ -349,21 +356,6 @@ Content-Type: multipart/form-data
 
 file: <audio/video file>
 language: ru
-```
-
-### Webhook от Kontur Talk
-```http
-POST /api/v1/kontur-talk/webhook
-Content-Type: application/json
-X-Kontur-Signature: <signature>
-
-{
-  "event": "recording.completed",
-  "recording_id": "rec_123456",
-  "meeting_id": "meet_789",
-  "duration": 3600,
-  "download_url": "https://..."
-}
 ```
 
 ### Получение результатов

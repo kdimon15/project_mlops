@@ -149,10 +149,34 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
       KAFKA_AUDIO_TOPIC: ${KAFKA_AUDIO_TOPIC}
+      KAFKA_DIARIZATION_TOPIC: ${KAFKA_DIARIZATION_TOPIC}
       KAFKA_TRANSCRIPTION_TOPIC: ${KAFKA_TRANSCRIPTION_TOPIC}
       HF_TOKEN: ${HF_TOKEN}
       ASR_MODEL_ID: ${ASR_MODEL_ID}
       ASR_MODEL_REVISION: ${ASR_MODEL_REVISION}
+    volumes:
+      - uploads:/tmp/uploads
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  diarization-worker:
+    build:
+      context: .
+      dockerfile: workers/diarization/Dockerfile
+    container_name: callscribe-diarization
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_AUDIO_TOPIC: ${KAFKA_AUDIO_TOPIC}
+      KAFKA_DIARIZATION_TOPIC: ${KAFKA_DIARIZATION_TOPIC}
+      HF_TOKEN: ${HF_TOKEN}
+      UPLOAD_DIR: ${UPLOAD_DIR}
+      DIARIZATION_MODEL: ${DIARIZATION_MODEL}
     volumes:
       - uploads:/tmp/uploads
     depends_on:
@@ -187,7 +211,11 @@ services:
         condition: service_started
 
   ollama:
-    image: ollama/ollama:latest
+    build:
+      context: .
+      dockerfile: workers/llm/ollama/Dockerfile
+      args:
+        LLM_MODEL: ${LLM_MODEL:-gemma3:1b}
     container_name: ollama
     environment:
       OLLAMA_HOST: 0.0.0.0

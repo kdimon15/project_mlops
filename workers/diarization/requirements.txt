@@ -1,0 +1,8 @@
+kafka-python>=2.0.3
+psycopg2-binary>=2.9.9
+torchaudio
+pydub
+torch>=2.0.0
+torchaudio>=2.2.0
+pyannote.audio==4.0.3
+pyannote.core

@@ -21,11 +21,12 @@ class Settings(BaseSettings):
     kafka_bootstrap_servers: str = "kafka:9092"
     kafka_audio_topic: str = "audio-topic"
     kafka_transcription_topic: str = "transcription-topic"
+    kafka_diarization_topic: str = "diarization-topic"
     
     # LLM (OpenAI-compatible API via Ollama)
     llm_api_base_url: str = "http://ollama:11434/v1"
     llm_api_key: str = "ollama"  # Ollama не требует реального ключа
-    llm_model: str = "gemma:2b"
+    llm_model: str = "gemma3:1b"
     llm_model_id: str = "gemma3:1b-it"
     llm_model_revision: str = "main"
     llm_timeout: int = 120
@@ -36,7 +37,6 @@ class Settings(BaseSettings):
     # Kontur Talk Integration
     kontur_talk_api_url: str = ""
     kontur_talk_api_key: str = ""
-    kontur_talk_webhook_secret: str = ""
 
     # Zoom Integration
     zoom_account_id: str = ""
@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     asr_model_id: str = "ai-sage/GigaAM-v3"
     asr_model_revision: str = "e2e_rnnt"
     asr_segment_seconds: int = 24
+    
+    # Diarization worker
+    diarization_model: str = "pyannote/speaker-diarization-3.1"
     
     # Prometheus
     metrics_enabled: bool = True
